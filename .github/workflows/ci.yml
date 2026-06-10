@@ -38,8 +38,8 @@ jobs:
       - name: Typecheck
         run: npm run check
 
-      - name: Unit tests
-        run: npm test
+      - name: Unit tests with coverage
+        run: npm test -- --coverage
 
       - name: CLI smoke checks
         run: |

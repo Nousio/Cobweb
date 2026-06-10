@@ -1,43 +1,69 @@
 import { callDaemon } from "@cobweb/daemon/client";
-import { stdin as input, stdout as output } from "node:process";
+import { stdin as processStdin, stdout as processStdout } from "node:process";
 import { createInterface } from "node:readline/promises";
+import type { Readable, Writable } from "node:stream";
 
-interface ShimRequest {
+export interface ShimRequest {
   id?: string;
   method?: string;
   params?: unknown;
 }
 
-export async function runStdioShim(): Promise<void> {
+export interface ShimStreams {
+  input?: Readable;
+  output?: Writable;
+}
+
+export async function handleShimLine(line: string): Promise<string | null> {
+  if (!line.trim()) {
+    return null;
+  }
+
+  let request: ShimRequest;
+  try {
+    request = parseLine(line);
+  } catch (error) {
+    return `${JSON.stringify(shimError("unknown", error))}\n`;
+  }
+
+  const id = request.id ?? "unknown";
+  try {
+    const result = await dispatch(request);
+    return `${JSON.stringify({ id, ok: true, result })}\n`;
+  } catch (error) {
+    return `${JSON.stringify(shimError(id, error))}\n`;
+  }
+}
+
+export async function runStdioShim(streams: ShimStreams = {}): Promise<void> {
+  const input = streams.input ?? processStdin;
+  const output = streams.output ?? processStdout;
   const rl = createInterface({ input, output });
 
   for await (const line of rl) {
-    if (!line.trim()) {
-      continue;
-    }
-
-    const request = parseLine(line);
-    const id = request.id ?? "unknown";
-
-    try {
-      const result = await dispatch(request);
-      output.write(`${JSON.stringify({ id, ok: true, result })}\n`);
-    } catch (error) {
-      output.write(
-        `${JSON.stringify({
-          id,
-          ok: false,
-          error: {
-            code: "MCP_SHIM_ERROR",
-            message: error instanceof Error ? error.message : String(error),
-          },
-        })}\n`,
-      );
+    const response = await handleShimLine(line);
+    if (response !== null) {
+      output.write(response);
     }
   }
 }
 
-async function dispatch(request: ShimRequest): Promise<unknown> {
+function shimError(id: string, error: unknown): {
+  id: string;
+  ok: false;
+  error: { code: string; message: string };
+} {
+  return {
+    id,
+    ok: false,
+    error: {
+      code: "MCP_SHIM_ERROR",
+      message: error instanceof Error ? error.message : String(error),
+    },
+  };
+}
+
+export async function dispatch(request: ShimRequest): Promise<unknown> {
   switch (request.method) {
     case "status":
       return callDaemon("status", undefined);
