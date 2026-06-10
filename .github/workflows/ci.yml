@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck, Test, Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.17.1
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: CLI smoke checks
+        run: |
+          npm run dev:cli -- scan examples/skills
+          npm run dev:cli -- audit examples/skills/high-risk-script
+          npm run dev:cli -- dedup examples/skills
+          npm run dev:cli -- import examples/skills/normal-review
+
+      - name: Daemon and SQLite smoke check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export COBWEB_DATA_DIR="${RUNNER_TEMP}/cobweb-smoke"
+          daemon_log="${RUNNER_TEMP}/cobwebd.log"
+
+          cleanup() {
+            npm run dev:cli -- daemon stop >/dev/null 2>&1 || true
+            if [[ -n "${daemon_pid:-}" ]]; then
+              wait "${daemon_pid}" >/dev/null 2>&1 || true
+            fi
+            if [[ -f "${daemon_log}" ]]; then
+              echo "::group::cobwebd log"
+              cat "${daemon_log}"
+              echo "::endgroup::"
+            fi
+          }
+          trap cleanup EXIT
+
+          npm run dev:daemon >"${daemon_log}" 2>&1 &
+          daemon_pid=$!
+
+          for _ in {1..40}; do
+            if [[ -S "${COBWEB_DATA_DIR}/cobwebd.sock" ]]; then
+              break
+            fi
+            sleep 0.25
+          done
+
+          if [[ ! -S "${COBWEB_DATA_DIR}/cobwebd.sock" ]]; then
+            echo "cobwebd socket was not created"
+            exit 1
+          fi
+
+          npm run dev:cli -- import examples/skills/normal-review --write
+          npm run dev:cli -- daemon status
+          npm run dev:cli -- daemon doctor
+          npm run dev:cli -- daemon stop
+          wait "${daemon_pid}"
+
+  package:
+    name: Build Artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.17.1
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build packages
+        run: npm run build
+
+      - name: Upload package dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobweb-dist
+          path: |
+            packages/*/dist
+          if-no-files-found: error

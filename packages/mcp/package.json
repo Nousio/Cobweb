@@ -1,0 +1,18 @@
+{
+  "name": "@cobweb/mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "cobweb-mcp": "./dist/index.js"
+  },
+  "dependencies": {
+    "@cobweb/core": "0.1.0",
+    "@cobweb/daemon": "0.1.0"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b --pretty false"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@cobweb/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "cobweb": "./dist/index.js",
+    "cw": "./dist/index.js"
+  },
+  "dependencies": {
+    "@cobweb/core": "0.1.0",
+    "@cobweb/daemon": "0.1.0",
+    "commander": "^15.0.0"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b --pretty false"
+  }
+}
