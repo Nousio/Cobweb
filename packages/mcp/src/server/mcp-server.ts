@@ -27,30 +27,30 @@ export const mcpTools: Array<{ name: ToolName; description: string; inputSchema:
   },
   {
     name: "skill_search",
-    description: "Search scanned skills lexically through the daemon.",
+    description: "Search indexed skills with FTS-backed match reasons and governance signals.",
     inputSchema: {
       type: "object",
-      properties: { path: { type: "string" }, query: { type: "string" } },
+      properties: { path: { type: "string" }, query: { type: "string" }, limit: { type: "number" } },
       required: ["path", "query"],
     },
   },
   {
     name: "skill_select",
-    description: "Select the first matching skill candidate for a query.",
+    description: "Select the best low-risk indexed skill for a query and explain the recommendation.",
     inputSchema: {
       type: "object",
-      properties: { path: { type: "string" }, query: { type: "string" } },
+      properties: { path: { type: "string" }, query: { type: "string" }, limit: { type: "number" } },
       required: ["path", "query"],
     },
   },
   {
     name: "skill_context",
-    description: "Return audit and lint context for a skill.",
+    description: "Return method, resource, policy, audit, and lint context for a skill.",
     inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
   },
   {
     name: "skill_validate",
-    description: "Validate a skill with lint, audit, and policy checks.",
+    description: "Validate a skill with lint, audit, policy, and indexed duplicate checks.",
     inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
   },
 ];
@@ -59,7 +59,7 @@ export async function runMcpServer(): Promise<void> {
   const server = new Server(
     {
       name: "cobweb",
-      version: "0.1.1",
+      version: "0.2.0",
     },
     {
       capabilities: {

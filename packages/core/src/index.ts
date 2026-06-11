@@ -2,7 +2,7 @@ export * from "./audit/audit.js";
 export * from "./audit/static-rules.js";
 export * from "./canonical/lockfile.js";
 export * from "./canonical/store.js";
-export type { BulkImportOptions, DbSkillStatus, ImportedSkillRecord } from "./db/database.js";
+export type { BulkImportOptions, DbSkillStatus, ImportedSkillRecord, SkillSearchOptions } from "./db/database.js";
 export * from "./db/schema.js";
 export * from "./dedup/dedup.js";
 export * from "./embedding/provider.js";

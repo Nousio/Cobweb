@@ -2,7 +2,7 @@ import { importCanonicalSkill } from "@cobweb/core";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createAppState } from "../app-state/app-state.js";
 import { callDaemon } from "./client.js";
@@ -80,10 +80,42 @@ describe("daemon IPC", () => {
     expect(status.db.total).toBe(1);
   });
 
+  it("normalizes relative import paths before indexing", async () => {
+    const relativeSkill = relative(process.cwd(), skillRoot);
+    const record = await callDaemon("importSkill", { path: relativeSkill }, socketPath);
+    expect(record.name).toBe("review");
+
+    await callDaemon("skill_search", { path: skillRoot, query: "review" }, socketPath);
+    const status = await callDaemon("status", undefined, socketPath);
+    expect(status.db.total).toBe(1);
+  });
+
   it("runs skill validation through the daemon", async () => {
     const validation = await callDaemon("skill_validate", { path: skillRoot }, socketPath);
+    expect(validation.valid).toBe(true);
     expect(validation.audit.riskLevel).toBe("low");
     expect(validation.lint.valid).toBe(true);
+    expect(validation.duplicates).toHaveLength(0);
+  });
+
+  it("searches indexed skills with explanations", async () => {
+    const result = await callDaemon("skill_search", { path: skillRoot, query: "review" }, socketPath);
+    expect(result.freshness).toBe("fresh");
+    expect(result.candidates[0]?.name).toBe("review");
+    expect(result.candidates[0]?.matchReasons.length).toBeGreaterThan(0);
+  });
+
+  it("selects the best low-risk skill with a recommendation", async () => {
+    const result = await callDaemon("skill_select", { path: skillRoot, query: "review" }, socketPath);
+    expect(result.selected?.name).toBe("review");
+    expect(result.recommendation.confidence).toBeGreaterThan(0);
+  });
+
+  it("returns skill context with methods, resources, and policy", async () => {
+    const context = await callDaemon("skill_context", { path: skillRoot }, socketPath);
+    expect(context.name).toBe("review");
+    expect(context.methods[0]?.summary).toContain("Safe body");
+    expect(context.policy.check.ok).toBe(true);
   });
 
   it("updates policy and checks alignment through the Writer Queue", async () => {
@@ -139,6 +171,44 @@ describe("daemon IPC", () => {
       expect(status.db.total).toBe(1);
     } finally {
       await syncServer.close();
+    }
+  });
+
+  it("re-indexes ad-hoc roots after a lockfile rebuild prunes them", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "cobweb-rebuild-reindex-"));
+    const projectRoot = join(baseDir, "project");
+    const projectSkill = join(projectRoot, "review");
+    await mkdir(projectSkill, { recursive: true });
+    await writeFile(
+      join(projectSkill, "SKILL.md"),
+      "---\nname: review\ndescription: Review skill\n---\n\n# Review\n\nSafe body.\n",
+    );
+
+    const source = join(baseDir, "source");
+    await mkdir(source, { recursive: true });
+    await writeFile(join(source, "SKILL.md"), "---\nname: other\ndescription: Other skill\n---\n\n# Body\n");
+
+    const rebuildSocket = join(baseDir, "cobwebd.sock");
+    const rebuildServer = await startIpcServer(
+      createAppState({
+        dataDir: baseDir,
+        dbPath: join(baseDir, "rebuild.db"),
+        socketPath: rebuildSocket,
+        lockPath: join(baseDir, "cobweb.lock.yaml"),
+      }),
+    );
+
+    try {
+      const indexed = await callDaemon("skill_search", { path: projectRoot, query: "review" }, rebuildSocket);
+      expect(indexed.candidates[0]?.name).toBe("review");
+
+      await callDaemon("importSkill", { path: source, canonicalDir: join(baseDir, "canonical") }, rebuildSocket);
+      await callDaemon("rebuildFromLockfile", {}, rebuildSocket);
+
+      const afterRebuild = await callDaemon("skill_search", { path: projectRoot, query: "review" }, rebuildSocket);
+      expect(afterRebuild.candidates[0]?.name).toBe("review");
+    } finally {
+      await rebuildServer.close();
     }
   });
 

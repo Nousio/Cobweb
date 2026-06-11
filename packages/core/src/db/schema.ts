@@ -1,4 +1,4 @@
-export const schemaVersion = 1;
+export const schemaVersion = 2;
 
 export const schemaSql = [
   `CREATE TABLE IF NOT EXISTS skills (
@@ -26,6 +26,29 @@ export const schemaSql = [
     risk_flags_json TEXT,
     content_hash TEXT,
     FOREIGN KEY(skill_id) REFERENCES skills(id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS methods (
+    id TEXT PRIMARY KEY,
+    skill_id TEXT NOT NULL,
+    method_name TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    trigger_terms_json TEXT NOT NULL,
+    inputs_json TEXT NOT NULL,
+    outputs_json TEXT NOT NULL,
+    required_tools_json TEXT NOT NULL,
+    start_section INTEGER NOT NULL,
+    end_section INTEGER NOT NULL,
+    extraction_confidence REAL NOT NULL,
+    FOREIGN KEY(skill_id) REFERENCES skills(id) ON DELETE CASCADE
+  )`,
+  `CREATE VIRTUAL TABLE IF NOT EXISTS skill_search_fts USING fts5(
+    skill_id UNINDEXED,
+    name,
+    description,
+    body,
+    headings,
+    method_summary,
+    tokenize = 'unicode61'
   )`,
   `CREATE TABLE IF NOT EXISTS provider_installs (
     id TEXT PRIMARY KEY,

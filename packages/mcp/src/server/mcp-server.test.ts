@@ -28,4 +28,10 @@ describe("MCP server tool dispatch", () => {
     await dispatchMcpTool("skill_validate", { path: "/skill" });
     expect(callDaemon).toHaveBeenCalledWith("skill_validate", { path: "/skill" });
   });
+
+  it("dispatches skill_search with routing options", async () => {
+    callDaemon.mockResolvedValue({ candidates: [] });
+    await dispatchMcpTool("skill_search", { path: "/skills", query: "review", limit: 3 });
+    expect(callDaemon).toHaveBeenCalledWith("skill_search", { path: "/skills", query: "review", limit: 3 });
+  });
 });

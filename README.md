@@ -90,6 +90,14 @@ cobweb daemon stop
 }
 ```
 
+The MCP server exposes the same local governance model to agents:
+
+- `status`, `scan`, and `audit` report daemon health and skill risk.
+- `skill_search` searches the daemon-managed FTS index and returns candidates with scores, match reasons, risk, and freshness.
+- `skill_select` chooses the best low-risk candidate and explains the recommendation.
+- `skill_context` returns method summaries, resources, policy, audit, and lint context for one skill.
+- `skill_validate` combines lint, audit, policy, and indexed duplicate checks before a skill is used or imported.
+
 ## Local Trust Model
 
 `cobwebd` is a local, single-user write proxy. For write commands such as `import --write`, `sync --write`, `policy` updates, and `vendor --write`, it reads and writes the paths your CLI or MCP client supplies, so only run them against trusted workspaces and skill directories. The daemon creates its data directory as `0700`, its pid lock as `0600`, and its socket as `0600`. Absolute resource references are reported for manual review rather than vendored automatically.

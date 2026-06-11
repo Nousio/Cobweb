@@ -1,3 +1,4 @@
+import type { SkillSearchResult } from "@cobweb/core";
 import {
   applyProjectionPlan,
   applyVendorPlan,
@@ -18,7 +19,7 @@ import {
 import { watch } from "node:fs";
 import { access, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { AppState } from "../app-state/app-state.js";
 import type { JsonRpcRequest, JsonRpcResponse } from "./protocol.js";
 
@@ -99,6 +100,10 @@ async function stopServer(state: AppState, server: net.Server, markStopping: () 
   state.stopping = true;
   markStopping();
   await state.writer.waitForIdle();
+  for (const timer of state.indexTimers.values()) {
+    clearTimeout(timer);
+  }
+  state.indexTimers.clear();
   for (const watcher of state.watchers.splice(0)) {
     watcher.close();
   }
@@ -176,7 +181,7 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
       };
     case "scan": {
       const params = expectParams<{ path: string }>(request.params);
-      rememberWatchRoot(state, params.path);
+      rememberWatchRoot(state, resolve(params.path));
       return scanSkills(params.path);
     }
     case "audit": {
@@ -186,16 +191,18 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
     case "importSkill": {
       const params = expectParams<{ path: string; canonicalDir?: string }>(request.params);
       return state.writer.enqueue("ImportSkill", async () => {
+        const sourcePath = resolve(params.path);
         const importPath = params.canonicalDir
-          ? (await importCanonicalSkill(params.path, {
-            canonicalDir: params.canonicalDir,
+          ? (await importCanonicalSkill(sourcePath, {
+            canonicalDir: resolve(params.canonicalDir),
             lockfilePath: state.paths.lockPath,
           })).canonicalPath
-          : params.path;
+          : sourcePath;
         const parsed = await parseSkillDirectory(importPath);
         const audit = auditParsedSkill(parsed);
+        const duplicates = state.db.findDuplicateCandidates(parsed);
         state.freshness = "fresh";
-        return state.db.upsertSkill(parsed, audit);
+        return { ...state.db.upsertSkill(parsed, audit), duplicates };
       });
     }
     case "checkpointWal":
@@ -207,6 +214,9 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
         const result = await state.db.rebuildFromLockfile(params.lockfilePath ?? state.paths.lockPath, {
           chunkSize: params.chunkSize,
         });
+        // rebuildFromLockfile prunes every skill outside the lockfile, so any ad-hoc root
+        // indexed in this session must be re-indexed on its next search.
+        state.indexedRoots.clear();
         state.freshness = "fresh";
         return result;
       });
@@ -285,32 +295,85 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
       return state.writer.enqueue("VendorResource", async () => applyVendorPlan(plan));
     }
     case "skill_search": {
-      const params = expectParams<{ path: string; query: string }>(request.params);
-      const result = await scanSkills(params.path);
-      const query = params.query.toLowerCase();
+      const params = expectParams<{ path: string; query: string; limit?: number }>(request.params);
+      const root = resolve(params.path);
+      const warnings = await ensureIndexedRoot(state, root);
+      const candidates = state.db.searchSkills(params.query, { limit: params.limit, root });
       return {
-        ...result,
-        candidates: result.candidates.filter((candidate) =>
-          `${candidate.name} ${candidate.description}`.toLowerCase().includes(query),
-        ),
+        query: params.query,
+        freshness: state.freshness,
+        candidates,
+        warnings,
       };
     }
     case "skill_select": {
-      const result = (await dispatch(state, { ...request, method: "skill_search" })) as Awaited<ReturnType<typeof scanSkills>>;
-      return result.candidates[0] ?? null;
+      const params = expectParams<{ path: string; query: string; limit?: number }>(request.params);
+      const result = await dispatch(state, {
+        ...request,
+        method: "skill_search",
+        params: { ...params, limit: params.limit ?? 5 },
+      });
+      const search = result as SkillSearchResult;
+      const selected = search.candidates.find((candidate) => !["high", "blocked"].includes(candidate.riskLevel)) ?? null;
+      const risks = selected ? auditParsedSkill(await parseSkillDirectory(selected.path)).findings : [];
+      return {
+        query: params.query,
+        freshness: search.freshness,
+        selected,
+        recommendation: selected
+          ? {
+            reason: `Selected ${selected.name} because it matched ${selected.matchReasons.map((reason) => reason.field).join(", ")}.`,
+            confidence: selected.score,
+          }
+          : {
+            reason: search.candidates.length > 0
+              ? "No candidate was selected because every match is high or blocked risk."
+              : "No indexed skill matched the query.",
+            confidence: 0,
+          },
+        rejected: search.candidates
+          .filter((candidate) => candidate.path !== selected?.path)
+          .map((candidate) => ({
+            path: candidate.path,
+            name: candidate.name,
+            reason: ["high", "blocked"].includes(candidate.riskLevel)
+              ? `Risk level is ${candidate.riskLevel}.`
+              : "Lower ranked match.",
+          })),
+        risks,
+      };
     }
     case "skill_context": {
       const params = expectParams<{ path: string }>(request.params);
-      const parsed = await parseSkillDirectory(params.path);
-      return { audit: auditParsedSkill(parsed), lint: await lintSkillDirectory(params.path) };
+      const skillPath = resolve(params.path);
+      const parsed = await parseSkillDirectory(skillPath);
+      const policy = await checkPolicyAlignment(skillPath);
+      return {
+        path: parsed.rootPath,
+        name: parsed.name,
+        description: parsed.description,
+        summary: parsed.methodSummaries[0]?.summary ?? parsed.description,
+        methods: parsed.methodSummaries,
+        resources: parsed.resources,
+        policy: { ...parsed.policy, check: policy },
+        audit: auditParsedSkill(parsed),
+        lint: await lintSkillDirectory(skillPath),
+      };
     }
     case "skill_validate": {
       const params = expectParams<{ path: string }>(request.params);
-      const parsed = await parseSkillDirectory(params.path);
+      const skillPath = resolve(params.path);
+      const parsed = await parseSkillDirectory(skillPath);
+      await ensureIndexedRoot(state, dirname(skillPath));
+      const audit = auditParsedSkill(parsed);
+      const lint = await lintSkillDirectory(skillPath);
+      const policy = await checkPolicyAlignment(skillPath);
       return {
-        audit: auditParsedSkill(parsed),
-        lint: await lintSkillDirectory(params.path),
-        policy: await checkPolicyAlignment(params.path),
+        valid: lint.valid && audit.riskLevel !== "blocked" && policy.ok,
+        audit,
+        lint,
+        policy,
+        duplicates: state.db.findDuplicateCandidates(parsed, { root: dirname(skillPath) }),
       };
     }
     case "doctor":
@@ -359,7 +422,13 @@ function startIdleTimer(state: AppState, server: net.Server, markStopping: () =>
   const timer = setInterval(() => {
     const idleFor = Date.now() - state.lastRequestAt;
     const writer = state.writer.snapshot();
-    if (!state.stopping && idleFor >= state.idleTimeoutMs && writer.pending === 0 && writer.running === null) {
+    if (
+      !state.stopping &&
+      idleFor >= state.idleTimeoutMs &&
+      writer.pending === 0 &&
+      writer.running === null &&
+      state.indexTimers.size === 0
+    ) {
       void stopServer(state, server, markStopping);
     }
   }, Math.min(Math.max(state.idleTimeoutMs, 1000), 60_000));
@@ -367,18 +436,74 @@ function startIdleTimer(state: AppState, server: net.Server, markStopping: () =>
   return timer;
 }
 
+async function ensureIndexedRoot(state: AppState, root: string): Promise<string[]> {
+  rememberWatchRoot(state, root);
+  if (state.indexedRoots.has(root) && state.freshness === "fresh") {
+    return [];
+  }
+  return indexRoot(state, root);
+}
+
+async function indexRoot(state: AppState, root: string): Promise<string[]> {
+  const pending = state.indexTimers.get(root);
+  if (pending) {
+    clearTimeout(pending);
+    state.indexTimers.delete(root);
+  }
+
+  try {
+    return await state.writer.enqueue("IndexSkillRoot", async () => {
+      state.freshness = "rebuilding";
+      const scan = await scanSkills(root);
+      const records = await Promise.all(
+        scan.candidates.map(async (candidate) => {
+          const skill = await parseSkillDirectory(candidate.path);
+          return { skill, audit: auditParsedSkill(skill) };
+        }),
+      );
+      const imported = state.db.bulkUpsertSkills(records);
+      state.db.pruneSkillsUnderRoot(root, imported.map((record) => record.id));
+      state.indexedRoots.add(root);
+      state.freshness = "fresh";
+      return scan.warnings;
+    });
+  } catch (error) {
+    state.freshness = "degraded";
+    state.lastError = toErrorMessage(error);
+    throw error;
+  }
+}
+
+function scheduleIndexRoot(state: AppState, root: string): void {
+  const existing = state.indexTimers.get(root);
+  if (existing) {
+    clearTimeout(existing);
+  }
+
+  const timer = setTimeout(() => {
+    state.indexTimers.delete(root);
+    void indexRoot(state, root).catch(() => {
+      // indexRoot records freshness and lastError for status.
+    });
+  }, 250);
+  timer.unref();
+  state.indexTimers.set(root, timer);
+}
+
 function rememberWatchRoot(state: AppState, root: string): void {
   if (state.watchRoots.has(root)) {
     return;
   }
-  state.watchRoots.add(root);
   try {
-    const watchOptions = process.platform === "darwin" || process.platform === "win32" ? { recursive: true } : {};
-    const watcher = watch(root, watchOptions, () => {
+    // Node >= 20.13 supports recursive fs.watch on Linux, macOS, and Windows; recursive
+    // coverage is required so edits to nested SKILL.md files invalidate the index.
+    const watcher = watch(root, { recursive: true }, () => {
       state.freshness = "degraded";
+      scheduleIndexRoot(state, root);
     });
     watcher.unref();
     state.watchers.push(watcher);
+    state.watchRoots.add(root);
   } catch {
     state.freshness = "degraded";
   }

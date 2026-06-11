@@ -1,6 +1,6 @@
 {
   "name": "@cobweb/cli",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -15,8 +15,8 @@
     "cw": "./dist/index.js"
   },
   "dependencies": {
-    "@cobweb/core": "0.1.1",
-    "@cobweb/daemon": "0.1.1",
+    "@cobweb/core": "0.2.0",
+    "@cobweb/daemon": "0.2.0",
     "commander": "^15.0.0"
   },
   "scripts": {

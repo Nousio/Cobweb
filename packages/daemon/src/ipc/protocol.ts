@@ -2,11 +2,14 @@ import type {
   AuditResult,
   DbSkillStatus,
   ImportedSkillRecord,
-  LintResult,
   PolicyCheckResult,
   ProjectionPlan,
   ProjectionResult,
   ScanResult,
+  SkillContextResult,
+  SkillSearchResult,
+  SkillSelectResult,
+  SkillValidateResult,
   VendorPlan,
   WriterQueueSnapshot,
 } from "@cobweb/core";
@@ -86,20 +89,20 @@ export interface DaemonMethods {
     result: VendorPlan;
   };
   skill_search: {
-    params: { path: string; query: string };
-    result: ScanResult;
+    params: { path: string; query: string; limit?: number };
+    result: SkillSearchResult;
   };
   skill_select: {
-    params: { path: string; query: string };
-    result: ScanResult["candidates"][number] | null;
+    params: { path: string; query: string; limit?: number };
+    result: SkillSelectResult;
   };
   skill_context: {
     params: { path: string };
-    result: { audit: AuditResult; lint: LintResult };
+    result: SkillContextResult;
   };
   skill_validate: {
     params: { path: string };
-    result: { audit: AuditResult; lint: LintResult; policy: PolicyCheckResult };
+    result: SkillValidateResult;
   };
   doctor: {
     params: undefined;
