@@ -98,8 +98,12 @@ function extractSections(root: MarkdownNode): ParsedSection[] {
 
 function extractMethodSummaries(sections: ParsedSection[]): ParsedMethodSummary[] {
   const summaries: ParsedMethodSummary[] = [];
+  const actionableSections = sections.filter((section) => section.content && isActionableHeading(section.title));
+  const sourceSections = actionableSections.length > 0 ? actionableSections : sections.filter((section) => section.content).slice(0, 1);
+  const seenSummaries = new Set<string>();
 
-  sections.forEach((section, index) => {
+  sourceSections.forEach((section) => {
+    const index = sections.indexOf(section);
     if (!section.content && section.title === "root") {
       return;
     }
@@ -108,6 +112,11 @@ function extractMethodSummaries(sections: ParsedSection[]): ParsedMethodSummary[
     if (!summary) {
       return;
     }
+    const summaryKey = summary.toLowerCase();
+    if (seenSummaries.has(summaryKey)) {
+      return;
+    }
+    seenSummaries.add(summaryKey);
 
     summaries.push({
       methodName: methodName(section.title, index),
@@ -125,6 +134,10 @@ function extractMethodSummaries(sections: ParsedSection[]): ParsedMethodSummary[
   });
 
   return summaries.slice(0, 8);
+}
+
+function isActionableHeading(title: string): boolean {
+  return /\b(?:method|workflow|procedure|steps?|usage|run|invoke|command)\b|方法|流程|步骤|使用|执行/iu.test(title);
 }
 
 function summarizeSection(section: ParsedSection): string {
@@ -200,7 +213,7 @@ function splitCsv(value: string): string[] {
 }
 
 function extractionConfidence(section: ParsedSection): number {
-  if (/\b(?:method|workflow|procedure|steps?|usage|run|invoke|command)\b|方法|流程|步骤|使用|执行/u.test(section.title)) {
+  if (isActionableHeading(section.title)) {
     return 0.85;
   }
   return section.content.length > 120 ? 0.65 : 0.5;

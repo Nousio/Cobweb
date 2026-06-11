@@ -94,6 +94,77 @@ Tools: git, rg
     expect(parsed.methodSummaries[0]?.triggerTerms).toContain("review");
   });
 
+  it("extracts method summaries from heading variants and removes duplicates", () => {
+    const parsed = parseSkillMarkdown(
+      "/tmp/skill",
+      `---
+name: workflow
+description: Workflow skill
+---
+
+# Procedure
+
+Run the same workflow.
+
+# 流程
+
+Run the same workflow.
+
+# Background
+
+This section should not become a method when actionable headings exist.
+`,
+    );
+
+    expect(parsed.methodSummaries).toHaveLength(1);
+    expect(parsed.methodSummaries[0]?.methodName).toBe("procedure");
+  });
+
+  it("falls back to one conservative summary without an actionable heading", () => {
+    const parsed = parseSkillMarkdown(
+      "/tmp/skill",
+      `---
+name: fallback
+description: Fallback skill
+---
+
+# Overview
+
+This skill explains when to inspect repository changes before a release. It has a long enough body to be summarized without inventing behavior.
+
+# Notes
+
+Additional notes should not create a second method.
+`,
+    );
+
+    expect(parsed.methodSummaries).toHaveLength(1);
+    expect(parsed.methodSummaries[0]).toMatchObject({
+      methodName: "overview",
+      extractionConfidence: 0.65,
+    });
+  });
+
+  it("ignores empty actionable sections", () => {
+    const parsed = parseSkillMarkdown(
+      "/tmp/skill",
+      `---
+name: empty
+description: Empty section skill
+---
+
+# Workflow
+
+# Overview
+
+Use the overview when workflow content is missing.
+`,
+    );
+
+    expect(parsed.methodSummaries).toHaveLength(1);
+    expect(parsed.methodSummaries[0]?.methodName).toBe("overview");
+  });
+
   it("detects local script references but ignores URLs", () => {
     const parsed = parseSkillMarkdown(
       "/tmp/skill",

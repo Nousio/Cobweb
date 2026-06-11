@@ -12,6 +12,8 @@ export interface AppState {
   idleTimeoutMs: number;
   watchers: FSWatcher[];
   watchRoots: Set<string>;
+  indexedRoots: Set<string>;
+  indexTimers: Map<string, NodeJS.Timeout>;
   stopping: boolean;
 }
 
@@ -26,6 +28,8 @@ export function createAppState(paths = defaultRuntimePaths(), options: { idleTim
     idleTimeoutMs: options.idleTimeoutMs ?? Number(process.env.COBWEB_IDLE_TIMEOUT_MS ?? 10 * 60 * 1000),
     watchers: [],
     watchRoots: new Set(),
+    indexedRoots: new Set(),
+    indexTimers: new Map(),
     stopping: false,
   };
 }

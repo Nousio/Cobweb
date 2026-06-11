@@ -1,4 +1,5 @@
 import type { DedupMatch, DedupResult, ParsedSkill } from "../types.js";
+import { jaccardSimilarity, tokenizeText } from "./similarity.js";
 
 export interface DedupOptions {
   threshold?: number;
@@ -23,9 +24,9 @@ export function dedupSkills(skills: ParsedSkill[], options: DedupOptions = {}): 
         continue;
       }
 
-      const score = jaccard(
-        tokenize(`${left.name} ${left.description}`),
-        tokenize(`${right.name} ${right.description}`),
+      const score = jaccardSimilarity(
+        tokenizeText(`${left.name} ${left.description}`),
+        tokenizeText(`${right.name} ${right.description}`),
       );
 
       if (score >= threshold) {
@@ -35,7 +36,8 @@ export function dedupSkills(skills: ParsedSkill[], options: DedupOptions = {}): 
 
       const leftMethodText = methodSummaryText(left);
       const rightMethodText = methodSummaryText(right);
-      const methodScore = leftMethodText && rightMethodText ? jaccard(tokenize(leftMethodText), tokenize(rightMethodText)) : 0;
+      const methodScore =
+        leftMethodText && rightMethodText ? jaccardSimilarity(tokenizeText(leftMethodText), tokenizeText(rightMethodText)) : 0;
       if (methodScore >= threshold) {
         matches.push(match(left, right, "method_summary", methodScore));
       }
@@ -59,31 +61,6 @@ function match(
   };
 }
 
-function tokenize(input: string): Set<string> {
-  return new Set(
-    input
-      .toLowerCase()
-      .split(/[^a-z0-9\u4e00-\u9fff]+/u)
-      .map((token) => token.trim())
-      .filter(Boolean),
-  );
-}
-
 function methodSummaryText(skill: ParsedSkill): string {
   return skill.methodSummaries.map((summary) => `${summary.methodName} ${summary.summary}`).join(" ");
-}
-
-function jaccard(left: Set<string>, right: Set<string>): number {
-  if (left.size === 0 && right.size === 0) {
-    return 1;
-  }
-
-  let intersection = 0;
-  for (const token of left) {
-    if (right.has(token)) {
-      intersection += 1;
-    }
-  }
-
-  return intersection / (left.size + right.size - intersection);
 }

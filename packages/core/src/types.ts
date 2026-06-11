@@ -1,5 +1,7 @@
 export type RiskLevel = "low" | "medium" | "high" | "blocked";
 
+export type IndexFreshness = "fresh" | "rebuilding" | "degraded";
+
 export type SourceType = "project" | "global" | "imported" | "unknown";
 
 export interface ParsedSection {
@@ -79,6 +81,43 @@ export interface ScanResult {
   warnings: string[];
 }
 
+export type SearchMatchField = "name" | "description" | "body" | "heading" | "method";
+
+export interface SearchMatchReason {
+  field: SearchMatchField;
+  signal: string;
+  snippet?: string;
+}
+
+export interface SkillSearchCandidate extends SkillCandidate {
+  score: number;
+  matchReasons: SearchMatchReason[];
+  methods: ParsedMethodSummary[];
+}
+
+export interface SkillSearchResult {
+  query: string;
+  freshness: IndexFreshness;
+  candidates: SkillSearchCandidate[];
+  warnings: string[];
+}
+
+export interface SkillSelectResult {
+  query: string;
+  freshness: IndexFreshness;
+  selected: SkillSearchCandidate | null;
+  recommendation: {
+    reason: string;
+    confidence: number;
+  };
+  rejected: Array<{
+    path: string;
+    name: string;
+    reason: string;
+  }>;
+  risks: AuditFinding[];
+}
+
 export interface AuditFinding {
   code: string;
   message: string;
@@ -89,6 +128,37 @@ export interface AuditFinding {
 export interface AuditResult {
   riskLevel: RiskLevel;
   findings: AuditFinding[];
+}
+
+export interface SkillContextResult {
+  path: string;
+  name: string;
+  description: string;
+  summary: string;
+  methods: ParsedMethodSummary[];
+  resources: ParsedResource[];
+  policy: ParsedPolicy & {
+    check: PolicyCheckResult;
+  };
+  audit: AuditResult;
+  lint: LintResult;
+}
+
+export interface DuplicateCandidate {
+  path: string;
+  name: string;
+  description: string;
+  score: number;
+  matchReasons: SearchMatchReason[];
+  canonicalPath?: string;
+}
+
+export interface SkillValidateResult {
+  valid: boolean;
+  audit: AuditResult;
+  lint: LintResult;
+  policy: PolicyCheckResult;
+  duplicates: DuplicateCandidate[];
 }
 
 export interface DedupMatch {
