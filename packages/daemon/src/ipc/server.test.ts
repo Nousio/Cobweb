@@ -72,11 +72,6 @@ describe("daemon IPC", () => {
     expect(result.riskLevel).toBe("low");
   });
 
-  it("dedups through the daemon", async () => {
-    const result = await callDaemon("dedup", { path: skillRoot }, socketPath);
-    expect(result.matches).toHaveLength(0);
-  });
-
   it("imports a skill via the Writer Queue and reflects it in status", async () => {
     const record = await callDaemon("importSkill", { path: skillRoot }, socketPath);
     expect(record.name).toBe("review");
@@ -85,10 +80,7 @@ describe("daemon IPC", () => {
     expect(status.db.total).toBe(1);
   });
 
-  it("runs lint and skill validation through the daemon", async () => {
-    const lint = await callDaemon("lint", { path: skillRoot }, socketPath);
-    expect(lint.valid).toBe(true);
-
+  it("runs skill validation through the daemon", async () => {
     const validation = await callDaemon("skill_validate", { path: skillRoot }, socketPath);
     expect(validation.audit.riskLevel).toBe("low");
     expect(validation.lint.valid).toBe(true);

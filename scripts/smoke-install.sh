@@ -50,9 +50,63 @@ if [[ ! -S "${DATA_DIR}/cobwebd.sock" ]]; then
 fi
 
 COBWEB_DATA_DIR="${DATA_DIR}" "${INSTALL_DIR}/bin/cobwebd" --status >/dev/null
-printf '{"id":"smoke","method":"status"}\n' \
-  | COBWEB_DATA_DIR="${DATA_DIR}" "${INSTALL_DIR}/bin/cobweb-mcp" --shim \
-  | grep -q '"ok":true'
+node - "${INSTALL_DIR}/bin/cobweb-mcp" "${DATA_DIR}" <<'NODE'
+import { spawn } from "node:child_process";
+
+const [bin, dataDir] = process.argv.slice(2);
+const child = spawn(bin, [], {
+  env: { ...process.env, COBWEB_DATA_DIR: dataDir },
+  stdio: ["pipe", "pipe", "inherit"],
+});
+
+const responses = new Map();
+let buffer = "";
+const timeout = setTimeout(() => {
+  child.kill();
+  console.error("timed out waiting for cobweb-mcp smoke response");
+  process.exit(1);
+}, 5000);
+
+child.stdout.on("data", (chunk) => {
+  buffer += chunk.toString("utf8");
+  for (;;) {
+    const newline = buffer.indexOf("\n");
+    if (newline === -1) {
+      break;
+    }
+    const line = buffer.slice(0, newline);
+    buffer = buffer.slice(newline + 1);
+    if (!line.trim()) {
+      continue;
+    }
+    const message = JSON.parse(line);
+    if (message.id !== undefined) {
+      responses.set(message.id, message);
+    }
+    const tools = responses.get(2)?.result?.tools;
+    if (Array.isArray(tools) && tools.some((tool) => tool.name === "status")) {
+      clearTimeout(timeout);
+      child.kill();
+      process.exit(0);
+    }
+  }
+});
+
+const send = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
+
+send({
+  jsonrpc: "2.0",
+  id: 1,
+  method: "initialize",
+  params: {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: "cobweb-smoke", version: "0.0.0" },
+  },
+});
+send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
+send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+NODE
 
 COBWEB_DATA_DIR="${DATA_DIR}" "${INSTALL_DIR}/bin/cobweb" daemon stop >/dev/null
 wait "${daemon_pid}"

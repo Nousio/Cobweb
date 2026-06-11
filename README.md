@@ -1,36 +1,83 @@
 # Cobweb
 
-Local governance kernel for agent skills — CLI (`cobweb`), daemon (`cobwebd`), MCP server (`cobweb-mcp`), SQLite state store, and `SKILL.md` parsing, auditing, dedup, and import.
+Cobweb is a local governance kernel for agent skills. It scans your `SKILL.md` files, audits them for risky patterns, finds duplicates, imports a single canonical copy into a local store, and syncs that copy out to your agent tools (Agents, Cursor, Claude, Codex).
 
-> Phase one (0.1.0) ships scanning, linting, auditing, dedup, canonical import, provider sync, policy checks, vendoring plans, and daemon-backed writes.
-> Version 0.1.1 adds the public aggregate installer package.
+Everything runs on your machine: a CLI (`cobweb`), a background daemon (`cobwebd`) that owns every write, and an MCP server (`cobweb-mcp`) so agents can call Cobweb directly.
 
 ## Installation
-
-Use the aggregate package for normal installation:
 
 ```bash
 npm install -g cobweb
 cobweb --version
 ```
 
-For one-off use:
+Run it once without installing:
 
 ```bash
 npx cobweb --help
 ```
 
-The aggregate package exposes:
+Installing the package gives you three commands: `cobweb` (alias `cw`) for the CLI, `cobwebd` for the daemon, and `cobweb-mcp` for the MCP server. The daemon starts on demand whenever a command needs to write, so day to day you only run `cobweb`.
 
-- `cobweb` / `cw`: user-facing CLI.
-- `cobwebd`: local daemon.
-- `cobweb-mcp`: MCP stdio server.
+## Features
 
-Internal packages (`@cobweb/core`, `@cobweb/daemon`, `@cobweb/cli`, `@cobweb/mcp`) remain independently packaged for debugging and layered releases, but users should not need to install them separately.
+Every command prints JSON, so results are easy to read or pipe into other tools.
+
+| Command | What it does |
+| --- | --- |
+| `scan` | Discover every `SKILL.md` under a directory and report the skills it finds. |
+| `lint` | Check a skill's description length, body length, and resource references. |
+| `audit` | Flag risky patterns such as `curl \| sh`, destructive deletes, secret reads, `sudo`, and out-of-bounds references. |
+| `dedup` | Detect duplicate or near-duplicate skills by content hash, name, and lexical similarity. |
+| `import` | Preview, then write, a skill into the local canonical store. |
+| `sync` | Project the canonical copy out to your agent providers. |
+| `policy` | Inspect or update a skill's invocation and self-contained policy. |
+| `vendor` | Copy a skill's external local resources next to it so it stays self-contained. |
+| `merge` | Plan a merge of one skill into another. |
+| `status` | Report daemon and store health. |
+
+## Usage
+
+Inspect skills (read-only, no daemon needed):
+
+```bash
+cobweb scan ./skills
+cobweb lint ./skills/my-skill
+cobweb audit ./skills/my-skill --strict
+cobweb dedup ./skills
+```
+
+Import into the local store and sync to your tools. These write through the daemon, which starts automatically; pass `--write` to persist, or omit it for a dry-run preview:
+
+```bash
+cobweb import ./skills/my-skill            # dry-run preview
+cobweb import ./skills/my-skill --write     # persist
+cobweb sync --target agents,cursor          # dry-run preview
+cobweb sync --target agents,cursor --write  # project the files
+```
+
+Manage policy and resources:
+
+```bash
+cobweb policy check ./skills/my-skill
+cobweb policy ./skills/my-skill --implicit off
+cobweb vendor ./skills/my-skill             # dry-run preview
+cobweb merge ./skills/old-skill ./skills/my-skill
+```
+
+Check status and control the daemon:
+
+```bash
+cobweb status              # falls back to read-only output when the daemon is down
+cobweb status --readonly
+cobweb daemon status
+cobweb daemon doctor
+cobweb daemon stop
+```
 
 ## MCP Client Config
 
-After installing the aggregate package, configure MCP clients to launch the public server command:
+`cobweb-mcp` speaks MCP over stdio and forwards each tool call to the local daemon. Point your MCP client at the installed command:
 
 ```json
 {
@@ -43,70 +90,6 @@ After installing the aggregate package, configure MCP clients to launch the publ
 }
 ```
 
-For compatibility with the legacy shim mode:
-
-```json
-{
-  "mcpServers": {
-    "cobweb-shim": {
-      "command": "cobweb-mcp",
-      "args": ["--shim"]
-    }
-  }
-}
-```
-
-## Phase-One Scope
-
-This repository currently implements the phase-one infrastructure:
-
-- `packages/core`: pure governance logic for parsing, scanning, linting, auditing, dedup, canonical storage, projection, providers, runtime paths, schema, and Writer Queue.
-- `packages/daemon`: local JSON-RPC daemon over Unix domain socket.
-- `packages/cli`: user-facing `cobweb` / `cw` commands.
-- `packages/mcp`: MCP stdio server plus a compatibility shim that forwards to the daemon.
-- `examples/skills`: smoke-test skills for normal, duplicate, escaping, high-risk, and policy-difference cases.
-
-Phase two will add FTS and full MCP routing. Phase three will add embedding.
-
-## Development
-
-```bash
-npm install
-npm run check          # tsc -b project references
-npm test               # vitest unit + integration tests
-npm test -- --coverage # coverage report (target: > 70%)
-```
-
-CI (`.github/workflows/ci.yml`) runs typecheck, tests, CLI/daemon smoke checks, and an install smoke test from the packed aggregate tarball on every PR.
-
-## CLI Commands
-
-```bash
-# read-only governance (no daemon required)
-npm run dev:cli -- scan examples/skills
-npm run dev:cli -- audit examples/skills/high-risk-script --strict
-npm run dev:cli -- dedup examples/skills
-npm run dev:cli -- lint examples/skills/normal-review
-npm run dev:cli -- vendor examples/skills/escaping-reference
-npm run dev:cli -- merge examples/skills/duplicate-review examples/skills/normal-review
-
-# import preview (dry-run) and daemon-backed write
-npm run dev:cli -- import examples/skills/normal-review
-npm run dev:cli -- import examples/skills/normal-review --write
-npm run dev:cli -- sync --target agents --dry-run
-npm run dev:cli -- policy check examples/skills/policy-difference
-
-# daemon lifecycle
-npm run dev:cli -- daemon start
-npm run dev:cli -- daemon status
-npm run dev:cli -- daemon doctor
-npm run dev:cli -- daemon stop
-
-# status, with read-only fallback when the daemon is down
-npm run dev:cli -- status
-npm run dev:cli -- status --readonly
-```
-
 ## Local Trust Model
 
-`cobwebd` is a local single-user write proxy. It can read and write paths supplied by the local CLI/MCP client for commands such as `import --write`, `sync --write`, `policy`, and `vendor --write`; only run those commands against trusted workspaces and skill directories. The daemon creates its data directory with `0700`, its pid lock with `0600`, and its Unix socket with `0600` permissions. Absolute resource references are reported for manual review instead of being vendored automatically.
+`cobwebd` is a local, single-user write proxy. For write commands such as `import --write`, `sync --write`, `policy` updates, and `vendor --write`, it reads and writes the paths your CLI or MCP client supplies, so only run them against trusted workspaces and skill directories. The daemon creates its data directory as `0700`, its pid lock as `0600`, and its socket as `0600`. Absolute resource references are reported for manual review rather than vendored automatically.

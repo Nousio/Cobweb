@@ -6,9 +6,7 @@ import {
   canonicalSkillFromRecord,
   checkPolicyAlignment,
   CobwebError,
-  createMergePlan,
   createVendorPlan,
-  dedupSkills,
   importCanonicalSkill,
   lintSkillDirectory,
   parseSkillDirectory,
@@ -104,6 +102,13 @@ async function stopServer(state: AppState, server: net.Server, markStopping: () 
   for (const watcher of state.watchers.splice(0)) {
     watcher.close();
   }
+  // Truncate the WAL before closing so a crash cannot strand uncheckpointed pages;
+  // never block socket cleanup on a checkpoint failure.
+  try {
+    state.db.checkpointWal();
+  } catch {
+    // ignore: best-effort durability step during shutdown
+  }
   state.db.close();
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
@@ -178,12 +183,6 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
       const params = expectParams<{ path: string }>(request.params);
       return auditParsedSkill(await parseSkillDirectory(params.path));
     }
-    case "dedup": {
-      const params = expectParams<{ path: string; threshold?: number }>(request.params);
-      const scan = await scanSkills(params.path);
-      const parsed = await Promise.all(scan.candidates.map((candidate) => parseSkillDirectory(candidate.path)));
-      return dedupSkills(parsed, { threshold: params.threshold });
-    }
     case "importSkill": {
       const params = expectParams<{ path: string; canonicalDir?: string }>(request.params);
       return state.writer.enqueue("ImportSkill", async () => {
@@ -198,23 +197,6 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
         state.freshness = "fresh";
         return state.db.upsertSkill(parsed, audit);
       });
-    }
-    case "importMany": {
-      const params = expectParams<{ paths: string[]; chunkSize?: number }>(request.params);
-      return state.writer.enqueue("ImportMany", async () => {
-        const records = await Promise.all(
-          params.paths.map(async (path) => {
-            const skill = await parseSkillDirectory(path);
-            return { skill, audit: auditParsedSkill(skill) };
-          }),
-        );
-        state.freshness = "fresh";
-        return state.db.bulkUpsertSkills(records, { chunkSize: params.chunkSize });
-      });
-    }
-    case "lint": {
-      const params = expectParams<{ path: string }>(request.params);
-      return lintSkillDirectory(params.path);
     }
     case "checkpointWal":
       return state.writer.enqueue("CheckpointWal", async () => ({ checkpoint: state.db.checkpointWal() }));
@@ -302,10 +284,6 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
       }
       return state.writer.enqueue("VendorResource", async () => applyVendorPlan(plan));
     }
-    case "merge": {
-      const params = expectParams<{ sourcePath: string; targetPath: string }>(request.params);
-      return createMergePlan(params.sourcePath, params.targetPath);
-    }
     case "skill_search": {
       const params = expectParams<{ path: string; query: string }>(request.params);
       const result = await scanSkills(params.path);
@@ -343,7 +321,12 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
           { name: "ipc", ok: true, message: state.paths.socketPath },
           { name: "writer_queue", ok: state.writer.snapshot().running === null },
           { name: "db_path", ok: true, message: state.paths.dbPath },
-          { name: "sqlite_integrity", ok: integrity === "ok", message: integrity },
+          {
+            name: "sqlite_integrity",
+            ok: integrity === "ok",
+            message:
+              integrity === "ok" ? integrity : `${integrity}; run \`cobweb daemon repair\` to rebuild from the lockfile`,
+          },
         ],
       };
     case "stop":
