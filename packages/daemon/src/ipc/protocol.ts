@@ -1,10 +1,8 @@
 import type {
   AuditResult,
   DbSkillStatus,
-  DedupResult,
   ImportedSkillRecord,
   LintResult,
-  MergePlan,
   PolicyCheckResult,
   ProjectionPlan,
   ProjectionResult,
@@ -59,21 +57,9 @@ export interface DaemonMethods {
     params: { path: string };
     result: AuditResult;
   };
-  dedup: {
-    params: { path: string; threshold?: number };
-    result: DedupResult;
-  };
   importSkill: {
     params: { path: string; canonicalDir?: string };
     result: ImportedSkillRecord;
-  };
-  importMany: {
-    params: { paths: string[]; chunkSize?: number };
-    result: ImportedSkillRecord[];
-  };
-  lint: {
-    params: { path: string };
-    result: LintResult;
   };
   checkpointWal: {
     params: undefined;
@@ -98,10 +84,6 @@ export interface DaemonMethods {
   vendor: {
     params: { path: string; dryRun?: boolean };
     result: VendorPlan;
-  };
-  merge: {
-    params: { sourcePath: string; targetPath: string };
-    result: MergePlan;
   };
   skill_search: {
     params: { path: string; query: string };

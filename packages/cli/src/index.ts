@@ -28,12 +28,7 @@ program
 program
   .command("scan")
   .argument("[path]", "directory to scan", ".")
-  .option("--record", "record scan result through daemon")
-  .action(async (path: string, options: { record?: boolean }) => {
-    if (options.record) {
-      printJson(await callDaemon("scan", { path }));
-      return;
-    }
+  .action(async (path: string) => {
     printJson(await scanSkills(path));
   });
 
@@ -201,18 +196,12 @@ daemon.command("start").action(async () => {
     // A failed status check means the daemon is not reachable; start below.
   }
 
-  const entrypoint = resolveDaemonEntrypoint();
-  if (!entrypoint) {
+  const pid = spawnDaemonProcess();
+  if (pid === null) {
     throw new Error("Cannot find built cobwebd entrypoint. Run `npm run build` first or start `npm run dev:daemon`.");
   }
 
-  const child = spawn(process.execPath, [entrypoint], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
-
-  printJson({ started: true, pid: child.pid });
+  printJson({ started: true, pid });
 });
 
 daemon.command("status").option("--json", "output JSON").action(async () => {
@@ -227,11 +216,9 @@ daemon.command("stop").action(async () => {
   printJson(await callDaemon("stop", undefined));
 });
 
-for (const commandName of ["install"]) {
-  program.command(commandName).allowUnknownOption(true).action(() => {
-    throw new Error(`${commandName} is a write command and must be implemented through daemon Writer Queue.`);
-  });
-}
+daemon.command("repair").description("Rebuild the SQLite index from the lockfile").action(async () => {
+  printJson(await callDaemonWithLazyStart("rebuildFromLockfile", {}));
+});
 
 async function callDaemonWithLazyStart<K extends keyof DaemonMethods>(
   method: K,
@@ -246,19 +233,13 @@ async function callDaemonWithLazyStart<K extends keyof DaemonMethods>(
 }
 
 async function startDaemonForLazyWrite(cause: unknown): Promise<void> {
-  const entrypoint = resolveDaemonEntrypoint();
-  if (!entrypoint) {
+  const pid = spawnDaemonProcess();
+  if (pid === null) {
     throw new Error(
       `Daemon is not reachable and no built cobwebd entrypoint was found. Run \`npm run build\` or set COBWEBD_BIN. Cause: ${cause instanceof Error ? cause.message : String(cause)
       }`,
     );
   }
-
-  const child = spawn(process.execPath, [entrypoint], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
 
   for (let attempt = 0; attempt < 20; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -293,6 +274,20 @@ function resolveDaemonEntrypoint(): string | null {
 
   const built = fileURLToPath(new URL("../../daemon/dist/index.js", import.meta.url));
   return existsSync(built) ? built : null;
+}
+
+function spawnDaemonProcess(): number | null {
+  const entrypoint = resolveDaemonEntrypoint();
+  if (!entrypoint) {
+    return null;
+  }
+
+  const child = spawn(process.execPath, [entrypoint], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  return child.pid ?? null;
 }
 
 program.parseAsync(process.argv).catch((error) => {
