@@ -1,6 +1,6 @@
 {
   "name": "@cobweb/mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -14,8 +14,8 @@
     "cobweb-mcp": "./dist/index.js"
   },
   "dependencies": {
-    "@cobweb/core": "0.1.0",
-    "@cobweb/daemon": "0.1.0",
+    "@cobweb/core": "0.1.1",
+    "@cobweb/daemon": "0.1.1",
     "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "scripts": {

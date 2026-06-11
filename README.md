@@ -1,8 +1,60 @@
 # Cobweb
 
-Local governance kernel for agent skills — CLI (`cobweb`), daemon (`cobwebd`), SQLite state store, and `SKILL.md` parsing, auditing, dedup, and import.
+Local governance kernel for agent skills — CLI (`cobweb`), daemon (`cobwebd`), MCP server (`cobweb-mcp`), SQLite state store, and `SKILL.md` parsing, auditing, dedup, and import.
 
 > Phase one (0.1.0) ships scanning, linting, auditing, dedup, canonical import, provider sync, policy checks, vendoring plans, and daemon-backed writes.
+> Version 0.1.1 adds the public aggregate installer package.
+
+## Installation
+
+Use the aggregate package for normal installation:
+
+```bash
+npm install -g cobweb
+cobweb --version
+```
+
+For one-off use:
+
+```bash
+npx cobweb --help
+```
+
+The aggregate package exposes:
+
+- `cobweb` / `cw`: user-facing CLI.
+- `cobwebd`: local daemon.
+- `cobweb-mcp`: MCP stdio server.
+
+Internal packages (`@cobweb/core`, `@cobweb/daemon`, `@cobweb/cli`, `@cobweb/mcp`) remain independently packaged for debugging and layered releases, but users should not need to install them separately.
+
+## MCP Client Config
+
+After installing the aggregate package, configure MCP clients to launch the public server command:
+
+```json
+{
+  "mcpServers": {
+    "cobweb": {
+      "command": "cobweb-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+For compatibility with the legacy shim mode:
+
+```json
+{
+  "mcpServers": {
+    "cobweb-shim": {
+      "command": "cobweb-mcp",
+      "args": ["--shim"]
+    }
+  }
+}
+```
 
 ## Phase-One Scope
 
@@ -25,9 +77,9 @@ npm test               # vitest unit + integration tests
 npm test -- --coverage # coverage report (target: > 70%)
 ```
 
-CI (`.github/workflows/ci.yml`) runs typecheck, tests, and CLI/daemon smoke checks on every PR.
+CI (`.github/workflows/ci.yml`) runs typecheck, tests, CLI/daemon smoke checks, and an install smoke test from the packed aggregate tarball on every PR.
 
-## CLI commands (0.1.0)
+## CLI Commands
 
 ```bash
 # read-only governance (no daemon required)

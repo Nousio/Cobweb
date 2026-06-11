@@ -1,0 +1,40 @@
+{
+  "name": "cobweb",
+  "version": "0.1.1",
+  "type": "module",
+  "description": "One-step installer package for Cobweb CLI, daemon, and MCP server.",
+  "main": "./dist/cli.js",
+  "types": "./dist/cli.d.ts",
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "README.md"
+  ],
+  "bin": {
+    "cobweb": "./dist/cli.js",
+    "cw": "./dist/cli.js",
+    "cobwebd": "./dist/daemon.js",
+    "cobweb-mcp": "./dist/mcp.js"
+  },
+  "bundledDependencies": [
+    "@cobweb/core",
+    "@cobweb/daemon",
+    "@cobweb/cli",
+    "@cobweb/mcp"
+  ],
+  "dependencies": {
+    "@cobweb/core": "0.1.1",
+    "@cobweb/daemon": "0.1.1",
+    "@cobweb/cli": "0.1.1",
+    "@cobweb/mcp": "0.1.1"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b --pretty false"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,17 +1,19 @@
 {
   "name": "cobweb-monorepo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -b packages/core packages/daemon packages/cli packages/mcp",
-    "check": "tsc -b --pretty false packages/core packages/daemon packages/cli packages/mcp",
+    "build": "tsc -b packages/core packages/daemon packages/cli packages/mcp packages/cobweb",
+    "check": "tsc -b --pretty false packages/core packages/daemon packages/cli packages/mcp packages/cobweb",
     "test": "vitest run",
     "dev:cli": "tsx packages/cli/src/index.ts",
-    "dev:daemon": "tsx packages/daemon/src/index.ts"
+    "dev:daemon": "tsx packages/daemon/src/index.ts",
+    "pack:release": "bash scripts/pack-release.sh",
+    "smoke:install": "bash scripts/smoke-install.sh"
   },
   "engines": {
     "node": ">=22"

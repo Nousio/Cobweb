@@ -22,8 +22,8 @@ export async function runDaemon(): Promise<void> {
   );
 }
 
-async function main(): Promise<void> {
-  if (process.argv.includes("--status")) {
+export async function runDaemonCli(argv = process.argv): Promise<void> {
+  if (argv.includes("--status")) {
     const status = await callDaemon("status", undefined);
     process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
     return;
@@ -35,7 +35,7 @@ async function main(): Promise<void> {
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMain) {
-  main().catch((error) => {
+  runDaemonCli().catch((error) => {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
   });

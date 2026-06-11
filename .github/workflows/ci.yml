@@ -90,6 +90,9 @@ jobs:
           npm run dev:cli -- daemon stop
           wait "${daemon_pid}"
 
+      - name: Installation tarball smoke check
+        run: npm run smoke:install
+
   package:
     name: Build Artifacts
     runs-on: ubuntu-latest
@@ -110,8 +113,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build packages
-        run: npm run build
+      - name: Pack release tarballs
+        run: |
+          mkdir -p "${RUNNER_TEMP}/cobweb-tarballs"
+          npm run pack:release -- "${RUNNER_TEMP}/cobweb-tarballs"
 
       - name: Upload package dist
         uses: actions/upload-artifact@v4
@@ -119,4 +124,5 @@ jobs:
           name: cobweb-dist
           path: |
             packages/*/dist
+            ${{ runner.temp }}/cobweb-tarballs/*.tgz
           if-no-files-found: error
