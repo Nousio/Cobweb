@@ -38,6 +38,12 @@ describe("handleShimLine", () => {
     expect(response.ok).toBe(true);
   });
 
+  it("forwards skill_validate with params", async () => {
+    callDaemon.mockResolvedValue({ audit: { riskLevel: "low" }, lint: { valid: true }, policy: { ok: true } });
+    await handleShimLine('{"id":"7","method":"skill_validate","params":{"path":"x"}}');
+    expect(callDaemon).toHaveBeenCalledWith("skill_validate", { path: "x" });
+  });
+
   it("reports an error for unsupported methods", async () => {
     const response = JSON.parse((await handleShimLine('{"id":"4","method":"vendor"}'))!);
     expect(response.ok).toBe(false);

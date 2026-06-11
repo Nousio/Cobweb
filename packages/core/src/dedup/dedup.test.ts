@@ -8,7 +8,9 @@ function makeSkill(overrides: Partial<ParsedSkill> & { rootPath: string }): Pars
     description: "",
     frontmatter: {},
     rawFrontmatter: "",
+    body: "",
     sections: [],
+    methodSummaries: [],
     resources: [],
     policy: {},
     contentHash: "hash",
@@ -70,5 +72,51 @@ describe("dedupSkills", () => {
 
     expect(result.matches[0]?.signal).toBe("name_description");
     expect(result.matches[0]?.score).toBe(1);
+  });
+
+  it("matches similar method summaries after name and description differ", () => {
+    const result = dedupSkills(
+      [
+        makeSkill({
+          rootPath: "/a",
+          name: "alpha",
+          description: "first",
+          contentHash: "h1",
+          methodSummaries: [
+            {
+              methodName: "review",
+              summary: "review pull request changes",
+              triggerTerms: [],
+              inputs: [],
+              outputs: [],
+              requiredTools: [],
+              sourceSectionRange: { startSection: 0, endSection: 0 },
+              extractionConfidence: 0.8,
+            },
+          ],
+        }),
+        makeSkill({
+          rootPath: "/b",
+          name: "beta",
+          description: "second",
+          contentHash: "h2",
+          methodSummaries: [
+            {
+              methodName: "inspect",
+              summary: "review pull request changes",
+              triggerTerms: [],
+              inputs: [],
+              outputs: [],
+              requiredTools: [],
+              sourceSectionRange: { startSection: 0, endSection: 0 },
+              extractionConfidence: 0.8,
+            },
+          ],
+        }),
+      ],
+      { threshold: 0.5 },
+    );
+
+    expect(result.matches[0]?.signal).toBe("method_summary");
   });
 });

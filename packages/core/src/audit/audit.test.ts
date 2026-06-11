@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ParsedResource, ParsedSkill } from "../types.js";
 import { auditParsedSkill } from "./audit.js";
+import { scanTextWithStaticRules } from "./static-rules.js";
 
 function makeSkill(overrides: Partial<ParsedSkill> = {}): ParsedSkill {
   return {
@@ -9,7 +10,9 @@ function makeSkill(overrides: Partial<ParsedSkill> = {}): ParsedSkill {
     rootPath: "/tmp/skill",
     frontmatter: {},
     rawFrontmatter: "",
+    body: "",
     sections: [],
+    methodSummaries: [],
     resources: [],
     policy: {},
     contentHash: "hash",
@@ -87,5 +90,10 @@ describe("auditParsedSkill", () => {
   it("flags missing description as medium", () => {
     const result = auditParsedSkill(makeSkill({ description: "" }));
     expect(result.findings.some((f) => f.code === "MISSING_DESCRIPTION")).toBe(true);
+  });
+
+  it("reuses static scanner rules directly", () => {
+    const findings = scanTextWithStaticRules("echo $GITHUB_TOKEN");
+    expect(findings.some((f) => f.code === "SECRET_READ")).toBe(true);
   });
 });

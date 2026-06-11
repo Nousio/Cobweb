@@ -1,31 +1,5 @@
 import type { AuditFinding, AuditResult, ParsedSkill, RiskLevel } from "../types.js";
-
-const dangerousPatterns: Array<{ code: string; pattern: RegExp; message: string; severity: RiskLevel }> = [
-  {
-    code: "DANGEROUS_RM_RF",
-    pattern: /\brm\s+-rf\s+(?:\/|\$HOME|~)/,
-    message: "Dangerous recursive delete command targets a broad path.",
-    severity: "blocked",
-  },
-  {
-    code: "CURL_PIPE_SHELL",
-    pattern: /\b(?:curl|wget)\b[\s\S]{0,120}\|\s*(?:sh|bash|zsh)\b/,
-    message: "External download is piped directly into a shell.",
-    severity: "high",
-  },
-  {
-    code: "SECRET_READ",
-    pattern: /\b(?:cat|open|pbcopy)\b[\s\S]{0,120}(?:id_rsa|\.ssh|\.env|secret|token|private[_-]?key)/i,
-    message: "Script appears to read credentials or secret material.",
-    severity: "high",
-  },
-  {
-    code: "SUDO_USAGE",
-    pattern: /\bsudo\b/,
-    message: "Script uses privilege escalation.",
-    severity: "medium",
-  },
-];
+import { scanTextWithStaticRules } from "./static-rules.js";
 
 export function auditParsedSkill(skill: ParsedSkill): AuditResult {
   const findings: AuditFinding[] = [];
@@ -59,15 +33,7 @@ export function auditParsedSkill(skill: ParsedSkill): AuditResult {
     }
   }
 
-  for (const rule of dangerousPatterns) {
-    if (rule.pattern.test(searchable)) {
-      findings.push({
-        code: rule.code,
-        message: rule.message,
-        severity: rule.severity,
-      });
-    }
-  }
+  findings.push(...scanTextWithStaticRules(searchable));
 
   if (!skill.description) {
     findings.push({

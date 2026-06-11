@@ -1,7 +1,8 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { importCanonicalSkill } from "../canonical/store.js";
 import type { AuditResult, ParsedSkill } from "../types.js";
 import { CobwebDatabase } from "./database.js";
 
@@ -21,7 +22,9 @@ function makeSkill(rootPath: string, overrides: Partial<ParsedSkill> = {}): Pars
     rootPath,
     frontmatter: { provenance: { source: "test" } },
     rawFrontmatter: "",
+    body: "",
     sections: [],
+    methodSummaries: [],
     resources: [
       { path: "./helper.sh", isExternal: false, isAbsolute: false, escapesRoot: false, mentionedBy: "script-reference" },
     ],
@@ -103,5 +106,35 @@ describe("CobwebDatabase", () => {
 
     expect(db.skillStatus().total).toBe(1);
     expect(db.integrityCheck()).toBe("ok");
+  });
+
+  it("bulk imports skills in chunks and checkpoints WAL", async () => {
+    const db = await tempDb();
+    const records = db.bulkUpsertSkills(
+      [
+        { skill: makeSkill("/skills/bulk-a", { name: "a", contentHash: "a" }), audit },
+        { skill: makeSkill("/skills/bulk-b", { name: "b", contentHash: "b" }), audit },
+      ],
+      { chunkSize: 1 },
+    );
+
+    expect(records).toHaveLength(2);
+    expect(db.skillStatus().total).toBe(2);
+    expect(db.checkpointWal()).toContain("checkpointed");
+  });
+
+  it("rebuilds from canonical skills listed in the lockfile", async () => {
+    const root = await mkdtemp(join(tmpdir(), "cobweb-rebuild-"));
+    const source = join(root, "source");
+    await mkdir(source, { recursive: true });
+    await writeFile(join(source, "SKILL.md"), "---\nname: rebuild\ndescription: Rebuild skill\n---\n\n# Body\n");
+
+    const lockfilePath = join(root, "cobweb.lock.yaml");
+    await importCanonicalSkill(source, { canonicalDir: join(root, "canonical"), lockfilePath });
+
+    const db = await tempDb();
+    const records = await db.rebuildFromLockfile(lockfilePath);
+    expect(records[0]?.name).toBe("rebuild");
+    expect(db.skillStatus().total).toBe(1);
   });
 });

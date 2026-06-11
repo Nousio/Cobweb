@@ -6,6 +6,7 @@ export interface RuntimePaths {
   dbPath: string;
   socketPath: string;
   lockPath: string;
+  daemonLockPath?: string;
 }
 
 export function defaultRuntimePaths(env: NodeJS.ProcessEnv = process.env): RuntimePaths {
@@ -16,5 +17,6 @@ export function defaultRuntimePaths(env: NodeJS.ProcessEnv = process.env): Runti
     dbPath: env.COBWEB_DB_PATH ?? join(dataDir, "cobweb.db"),
     socketPath: env.COBWEB_SOCKET_PATH ?? join(dataDir, "cobwebd.sock"),
     lockPath: env.COBWEB_LOCK_PATH ?? join(dataDir, "cobweb.lock.yaml"),
+    daemonLockPath: env.COBWEB_DAEMON_LOCK_PATH ?? join(dataDir, "cobwebd.lock.json"),
   };
 }

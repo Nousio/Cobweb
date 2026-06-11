@@ -20,12 +20,7 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "paths": {
-      "*": [
-        "../../*"
-      ]
-    }
+    "resolveJsonModule": true
   },
   "include": [
     "src/**/*.ts"

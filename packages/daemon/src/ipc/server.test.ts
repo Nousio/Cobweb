@@ -1,3 +1,4 @@
+import { importCanonicalSkill } from "@cobweb/core";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
@@ -82,6 +83,71 @@ describe("daemon IPC", () => {
 
     const status = await callDaemon("status", undefined, socketPath);
     expect(status.db.total).toBe(1);
+  });
+
+  it("runs lint and skill validation through the daemon", async () => {
+    const lint = await callDaemon("lint", { path: skillRoot }, socketPath);
+    expect(lint.valid).toBe(true);
+
+    const validation = await callDaemon("skill_validate", { path: skillRoot }, socketPath);
+    expect(validation.audit.riskLevel).toBe("low");
+    expect(validation.lint.valid).toBe(true);
+  });
+
+  it("updates policy and checks alignment through the Writer Queue", async () => {
+    const updated = await callDaemon("updatePolicy", { path: skillRoot, implicitInvocation: false }, socketPath);
+    expect(updated.ok).toBe(true);
+
+    const result = await callDaemon("policyCheck", { path: skillRoot }, socketPath);
+    expect(result.ok).toBe(true);
+  });
+
+  it("imports to canonical store and returns sync dry-run plans", async () => {
+    const record = await callDaemon("importSkill", { path: skillRoot, canonicalDir: join(dir, "canonical") }, socketPath);
+    expect(record.name).toBe("review");
+
+    const sync = await callDaemon("sync", { projectRoot: dir, target: ["agents"], dryRun: true }, socketPath);
+    expect(sync.plans.length).toBeGreaterThanOrEqual(1);
+    expect(sync.results).toHaveLength(0);
+  });
+
+  it("checkpoints WAL through the Writer Queue", async () => {
+    const result = await callDaemon("checkpointWal", undefined, socketPath);
+    expect(result.checkpoint).toContain("checkpointed");
+  });
+
+  it("sync --write upserts lockfile skills before recording provider installs", async () => {
+    const syncDir = await mkdtemp(join(tmpdir(), "cobweb-sync-empty-db-"));
+    const source = join(syncDir, "source");
+    await mkdir(source, { recursive: true });
+    await writeFile(join(source, "SKILL.md"), "---\nname: synced\ndescription: Synced skill\n---\n\n# Body\n");
+
+    const lockfilePath = join(syncDir, "cobweb.lock.yaml");
+    await importCanonicalSkill(source, { canonicalDir: join(syncDir, "canonical"), lockfilePath });
+
+    const syncSocket = join(syncDir, "cobwebd.sock");
+    const syncServer = await startIpcServer(
+      createAppState({
+        dataDir: syncDir,
+        dbPath: join(syncDir, "empty.db"),
+        socketPath: syncSocket,
+        lockPath: lockfilePath,
+      }),
+    );
+
+    try {
+      const result = await callDaemon(
+        "sync",
+        { projectRoot: syncDir, target: ["agents"], strategy: "copy", dryRun: false },
+        syncSocket,
+      );
+      expect(result.results).toHaveLength(1);
+
+      const status = await callDaemon("status", undefined, syncSocket);
+      expect(status.db.total).toBe(1);
+    } finally {
+      await syncServer.close();
+    }
   });
 
   it("runs doctor with an ok integrity check", async () => {

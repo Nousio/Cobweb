@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { auditParsedSkill } from "../audit/audit.js";
+import { readCobwebLockfile } from "../canonical/lockfile.js";
 import { sha256 } from "../hash.js";
-import type { AuditResult, ParsedSkill } from "../types.js";
+import { parseSkillDirectory } from "../parser/skill-parser.js";
+import type { AuditResult, ParsedSkill, ProjectionResult } from "../types.js";
 import { schemaSql, schemaVersion, sqlitePragmas } from "./schema.js";
 
 export interface DbSkillStatus {
@@ -17,6 +20,10 @@ export interface ImportedSkillRecord {
   name: string;
   contentHash: string;
   riskLevel: string;
+}
+
+export interface BulkImportOptions {
+  chunkSize?: number;
 }
 
 export class CobwebDatabase {
@@ -35,6 +42,13 @@ export class CobwebDatabase {
   integrityCheck(): string {
     const row = this.db.prepare("PRAGMA integrity_check").get() as { integrity_check?: string } | undefined;
     return row?.integrity_check ?? "unknown";
+  }
+
+  checkpointWal(): string {
+    const row = this.db.prepare("PRAGMA wal_checkpoint(RESTART)").get() as
+      | { busy?: number; log?: number; checkpointed?: number }
+      | undefined;
+    return JSON.stringify(row ?? {});
   }
 
   skillStatus(): DbSkillStatus {
@@ -56,14 +70,89 @@ export class CobwebDatabase {
   }
 
   upsertSkill(skill: ParsedSkill, audit: AuditResult): ImportedSkillRecord {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const record = this.upsertSkillInTransaction(skill, audit);
+      this.db.exec("COMMIT");
+      return record;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  bulkUpsertSkills(records: Array<{ skill: ParsedSkill; audit: AuditResult }>, options: BulkImportOptions = {}): ImportedSkillRecord[] {
+    const chunkSize = options.chunkSize ?? 50;
+    const imported: ImportedSkillRecord[] = [];
+
+    for (let index = 0; index < records.length; index += chunkSize) {
+      const chunk = records.slice(index, index + chunkSize);
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        for (const record of chunk) {
+          imported.push(this.upsertSkillInTransaction(record.skill, record.audit));
+        }
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+
+    return imported;
+  }
+
+  async rebuildFromLockfile(lockfilePath: string, options: BulkImportOptions = {}): Promise<ImportedSkillRecord[]> {
+    const lockfile = await readCobwebLockfile(lockfilePath);
+    const records = await Promise.all(
+      lockfile.skills.map(async (record) => {
+        const skill = await parseSkillDirectory(record.canonicalPath);
+        return { skill, audit: auditParsedSkill(skill) };
+      }),
+    );
+    return this.bulkUpsertSkills(records, options);
+  }
+
+  recordProjectionInstall(skillRootPath: string, result: ProjectionResult): void {
+    const skillId = sha256(skillRootPath);
+    this.db
+      .prepare(
+        `INSERT INTO provider_installs (
+          id,
+          skill_id,
+          provider_name,
+          install_path,
+          projection_strategy,
+          content_hash,
+          drift,
+          last_sync_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          install_path = excluded.install_path,
+          projection_strategy = excluded.projection_strategy,
+          content_hash = excluded.content_hash,
+          drift = excluded.drift,
+          last_sync_at = excluded.last_sync_at`,
+      )
+      .run(
+        sha256(`${skillId}:${result.providerName}:${result.installPath}`),
+        skillId,
+        result.providerName,
+        result.installPath,
+        result.strategy,
+        result.contentHash,
+        result.drift ? 1 : 0,
+        result.lastSyncAt,
+      );
+  }
+
+  private upsertSkillInTransaction(skill: ParsedSkill, audit: AuditResult): ImportedSkillRecord {
     const skillId = sha256(skill.rootPath);
     const updatedAt = new Date().toISOString();
 
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      this.db
-        .prepare(
-          `INSERT INTO skills (
+    this.db
+      .prepare(
+        `INSERT INTO skills (
             id,
             name,
             description,
@@ -90,27 +179,27 @@ export class CobwebDatabase {
             risk_level = excluded.risk_level,
             content_hash = excluded.content_hash,
             updated_at = excluded.updated_at`,
-        )
-        .run(
-          skillId,
-          skill.name,
-          skill.description,
-          skill.rootPath,
-          skill.rootPath,
-          "imported",
-          JSON.stringify(skill.frontmatter.provenance ?? null),
-          JSON.stringify(skill.resources.map((resource) => resource.path)),
-          booleanToSql(skill.policy.implicitInvocation),
-          booleanToSql(skill.policy.selfContained),
-          null,
-          audit.riskLevel,
-          skill.contentHash,
-          updatedAt,
-        );
+      )
+      .run(
+        skillId,
+        skill.name,
+        skill.description,
+        skill.rootPath,
+        skill.rootPath,
+        "imported",
+        JSON.stringify(skill.frontmatter.provenance ?? null),
+        JSON.stringify(skill.resources.map((resource) => resource.path)),
+        booleanToSql(skill.policy.implicitInvocation),
+        booleanToSql(skill.policy.selfContained),
+        null,
+        audit.riskLevel,
+        skill.contentHash,
+        updatedAt,
+      );
 
-      this.db.prepare("DELETE FROM resources WHERE skill_id = ?").run(skillId);
-      const insertResource = this.db.prepare(
-        `INSERT INTO resources (
+    this.db.prepare("DELETE FROM resources WHERE skill_id = ?").run(skillId);
+    const insertResource = this.db.prepare(
+      `INSERT INTO resources (
           id,
           skill_id,
           resource_type,
@@ -119,40 +208,34 @@ export class CobwebDatabase {
           risk_flags_json,
           content_hash
         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const resource of skill.resources) {
+      insertResource.run(
+        randomUUID(),
+        skillId,
+        resource.mentionedBy,
+        resource.path,
+        resource.isExternal ? 1 : 0,
+        JSON.stringify({
+          escapesRoot: resource.escapesRoot,
+          isAbsolute: resource.isAbsolute,
+        }),
+        null,
       );
-      for (const resource of skill.resources) {
-        insertResource.run(
-          randomUUID(),
-          skillId,
-          resource.mentionedBy,
-          resource.path,
-          resource.isExternal ? 1 : 0,
-          JSON.stringify({
-            escapesRoot: resource.escapesRoot,
-            isAbsolute: resource.isAbsolute,
-          }),
-          null,
-        );
-      }
+    }
 
-      this.db.prepare("DELETE FROM audit_results WHERE skill_id = ?").run(skillId);
-      this.db
-        .prepare(
-          `INSERT INTO audit_results (
+    this.db.prepare("DELETE FROM audit_results WHERE skill_id = ?").run(skillId);
+    this.db
+      .prepare(
+        `INSERT INTO audit_results (
             id,
             skill_id,
             risk_level,
             findings_json,
             audited_at
           ) VALUES (?, ?, ?, ?, ?)`,
-        )
-        .run(randomUUID(), skillId, audit.riskLevel, JSON.stringify(audit.findings), updatedAt);
-
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+      )
+      .run(randomUUID(), skillId, audit.riskLevel, JSON.stringify(audit.findings), updatedAt);
 
     return {
       id: skillId,

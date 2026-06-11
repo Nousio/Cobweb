@@ -61,6 +61,37 @@ Body text.
     expect(parsed.policy.implicitInvocation).toBe(false);
     expect(parsed.sections[0]?.title).toBe("root");
     expect(parsed.sections.some((s) => s.title === "Heading One")).toBe(true);
+    expect(parsed.body).toContain("Intro paragraph");
+  });
+
+  it("extracts method summaries from actionable sections", () => {
+    const parsed = parseSkillMarkdown(
+      "/tmp/skill",
+      `---
+name: review
+description: Review changed files
+---
+
+# Usage
+
+Review changed files before merge.
+
+Inputs: repo path
+
+Outputs: review notes
+
+Tools: git, rg
+`,
+    );
+
+    expect(parsed.methodSummaries[0]).toMatchObject({
+      methodName: "usage",
+      summary: "Review changed files before merge.",
+      inputs: ["repo path"],
+      outputs: ["review notes"],
+      requiredTools: ["git", "rg"],
+    });
+    expect(parsed.methodSummaries[0]?.triggerTerms).toContain("review");
   });
 
   it("detects local script references but ignores URLs", () => {

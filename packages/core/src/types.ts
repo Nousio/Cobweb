@@ -8,6 +8,20 @@ export interface ParsedSection {
   content: string;
 }
 
+export interface ParsedMethodSummary {
+  methodName: string;
+  summary: string;
+  triggerTerms: string[];
+  inputs: string[];
+  outputs: string[];
+  requiredTools: string[];
+  sourceSectionRange: {
+    startSection: number;
+    endSection: number;
+  };
+  extractionConfidence: number;
+}
+
 export interface ParsedResource {
   path: string;
   isExternal: boolean;
@@ -27,11 +41,27 @@ export interface ParsedSkill {
   rootPath: string;
   frontmatter: Record<string, unknown>;
   rawFrontmatter: string;
+  body: string;
   sections: ParsedSection[];
+  methodSummaries: ParsedMethodSummary[];
   resources: ParsedResource[];
   policy: ParsedPolicy;
   contentHash: string;
   warnings: string[];
+}
+
+export type LintSeverity = "warning" | "error";
+
+export interface LintFinding {
+  code: string;
+  message: string;
+  severity: LintSeverity;
+  path?: string;
+}
+
+export interface LintResult {
+  valid: boolean;
+  findings: LintFinding[];
 }
 
 export interface SkillCandidate {
@@ -64,7 +94,7 @@ export interface AuditResult {
 export interface DedupMatch {
   leftPath: string;
   rightPath: string;
-  signal: "content_hash" | "name" | "name_description";
+  signal: "content_hash" | "name" | "name_description" | "method_summary";
   score: number;
 }
 
@@ -96,4 +126,60 @@ export interface ProjectionPlan {
   installPath: string;
   strategy: "link" | "copy";
   contentHash: string;
+}
+
+export interface ProjectionResult extends ProjectionPlan {
+  written: boolean;
+  drift: boolean;
+  lastSyncAt: string;
+}
+
+export interface CanonicalSkillRecord {
+  id: string;
+  name: string;
+  description: string;
+  canonicalPath: string;
+  sourcePath: string;
+  contentHash: string;
+  provenance?: Record<string, unknown>;
+}
+
+export interface CobwebLockfile {
+  version: 1;
+  generatedAt: string;
+  skills: CanonicalSkillRecord[];
+}
+
+export interface PolicyFinding {
+  code: string;
+  message: string;
+  path?: string;
+}
+
+export interface PolicyCheckResult {
+  ok: boolean;
+  findings: PolicyFinding[];
+}
+
+export interface VendorAction {
+  sourcePath: string;
+  targetPath: string;
+  rewriteFrom: string;
+  rewriteTo: string;
+  exists: boolean;
+}
+
+export interface VendorPlan {
+  skillPath: string;
+  dryRun: boolean;
+  actions: VendorAction[];
+  warnings: string[];
+}
+
+export interface MergePlan {
+  sourcePath: string;
+  targetPath: string;
+  dryRun: true;
+  actions: string[];
+  matches: DedupMatch[];
 }

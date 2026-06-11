@@ -71,6 +71,14 @@ export async function dispatch(request: ShimRequest): Promise<unknown> {
       return callDaemon("scan", expectParams<{ path: string }>(request.params));
     case "audit":
       return callDaemon("audit", expectParams<{ path: string }>(request.params));
+    case "skill_search":
+      return callDaemon("skill_search", expectParams<{ path: string; query: string }>(request.params));
+    case "skill_select":
+      return callDaemon("skill_select", expectParams<{ path: string; query: string }>(request.params));
+    case "skill_context":
+      return callDaemon("skill_context", expectParams<{ path: string }>(request.params));
+    case "skill_validate":
+      return callDaemon("skill_validate", expectParams<{ path: string }>(request.params));
     default:
       throw new Error(`Unsupported phase-one MCP shim method: ${request.method ?? "<missing>"}`);
   }

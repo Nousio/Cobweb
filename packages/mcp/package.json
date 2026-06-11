@@ -4,12 +4,19 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map"
+  ],
   "bin": {
     "cobweb-mcp": "./dist/index.js"
   },
   "dependencies": {
     "@cobweb/core": "0.1.0",
-    "@cobweb/daemon": "0.1.0"
+    "@cobweb/daemon": "0.1.0",
+    "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "scripts": {
     "build": "tsc -b",

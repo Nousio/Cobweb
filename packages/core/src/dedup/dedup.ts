@@ -30,6 +30,14 @@ export function dedupSkills(skills: ParsedSkill[], options: DedupOptions = {}): 
 
       if (score >= threshold) {
         matches.push(match(left, right, "name_description", score));
+        continue;
+      }
+
+      const leftMethodText = methodSummaryText(left);
+      const rightMethodText = methodSummaryText(right);
+      const methodScore = leftMethodText && rightMethodText ? jaccard(tokenize(leftMethodText), tokenize(rightMethodText)) : 0;
+      if (methodScore >= threshold) {
+        matches.push(match(left, right, "method_summary", methodScore));
       }
     }
   }
@@ -59,6 +67,10 @@ function tokenize(input: string): Set<string> {
       .map((token) => token.trim())
       .filter(Boolean),
   );
+}
+
+function methodSummaryText(skill: ParsedSkill): string {
+  return skill.methodSummaries.map((summary) => `${summary.methodName} ${summary.summary}`).join(" ");
 }
 
 function jaccard(left: Set<string>, right: Set<string>): number {
