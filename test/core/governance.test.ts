@@ -2,13 +2,13 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { readCobwebLockfile } from "./canonical/lockfile.js";
-import { importCanonicalSkill } from "./canonical/store.js";
-import { createMergePlan } from "./merge/merge.js";
-import { checkPolicyAlignment, updateSkillPolicy } from "./policy/policy.js";
-import { applyProjectionPlan, detectProjectionDrift } from "./projection/projection.js";
-import { builtinProviders } from "./providers/provider.js";
-import { applyVendorPlan, createVendorPlan } from "./vendor/vendor.js";
+import { readCobwebLockfile } from "../../packages/core/src/canonical/lockfile.js";
+import { importCanonicalSkill } from "../../packages/core/src/canonical/store.js";
+import { createMergePlan } from "../../packages/core/src/merge/merge.js";
+import { checkPolicyAlignment, updateSkillPolicy } from "../../packages/core/src/policy/policy.js";
+import { applyProjectionPlan, detectProjectionDrift } from "../../packages/core/src/projection/projection.js";
+import { builtinProviders } from "../../packages/core/src/providers/provider.js";
+import { applyVendorPlan, createVendorPlan } from "../../packages/core/src/vendor/vendor.js";
 
 async function writeSkill(root: string, name: string, body = "# Usage\n\nRun safely.\n"): Promise<string> {
   const dir = join(root, name);
@@ -44,7 +44,7 @@ describe("core governance helpers", () => {
         rootPath: source,
         canonicalPath: source,
         sourceType: "imported",
-        contentHash: (await import("./parser/skill-parser.js")).parseSkillMarkdown(source, await readFile(join(source, "SKILL.md"), "utf8")).contentHash,
+        contentHash: (await import("../../packages/core/src/parser/skill-parser.js")).parseSkillMarkdown(source, await readFile(join(source, "SKILL.md"), "utf8")).contentHash,
         riskLevel: "low",
       },
       { providerName: "agents", projectRoot: root, strategy: "copy" },
@@ -60,7 +60,7 @@ describe("core governance helpers", () => {
     const root = await mkdtemp(join(tmpdir(), "cobweb-link-projection-"));
     const source = await writeSkill(root, "link-skill");
     const provider = builtinProviders().find((candidate) => candidate.name === "agents")!;
-    const parsed = (await import("./parser/skill-parser.js")).parseSkillMarkdown(source, await readFile(join(source, "SKILL.md"), "utf8"));
+    const parsed = (await import("../../packages/core/src/parser/skill-parser.js")).parseSkillMarkdown(source, await readFile(join(source, "SKILL.md"), "utf8"));
     const plan = provider.project(
       {
         id: "1",

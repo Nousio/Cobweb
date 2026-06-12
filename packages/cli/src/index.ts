@@ -15,6 +15,7 @@ import { Command } from "commander";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { formatDaemonStatus, formatDoctorResult, printText } from "./output/human.js";
 import { printError, printJson } from "./output/json.js";
 
 const program = new Command();
@@ -204,12 +205,22 @@ daemon.command("start").action(async () => {
   printJson({ started: true, pid });
 });
 
-daemon.command("status").option("--json", "output JSON").action(async () => {
-  printJson(await callDaemon("status", undefined));
+daemon.command("status").option("--json", "output JSON").action(async (options: { json?: boolean }) => {
+  const status = await callDaemon("status", undefined);
+  if (options.json) {
+    printJson(status);
+    return;
+  }
+  printText(formatDaemonStatus(status));
 });
 
-daemon.command("doctor").action(async () => {
-  printJson(await callDaemon("doctor", undefined));
+daemon.command("doctor").option("--json", "output JSON").action(async (options: { json?: boolean }) => {
+  const result = await callDaemon("doctor", undefined);
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  printText(formatDoctorResult(result));
 });
 
 daemon.command("stop").action(async () => {

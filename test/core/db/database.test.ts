@@ -2,9 +2,9 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { importCanonicalSkill } from "../canonical/store.js";
-import type { AuditResult, ParsedSkill } from "../types.js";
-import { CobwebDatabase } from "./database.js";
+import { importCanonicalSkill } from "../../../packages/core/src/canonical/store.js";
+import type { AuditResult, ParsedSkill } from "../../../packages/core/src/types.js";
+import { CobwebDatabase } from "../../../packages/core/src/db/database.js";
 
 const open: CobwebDatabase[] = [];
 

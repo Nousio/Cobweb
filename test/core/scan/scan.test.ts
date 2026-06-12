@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { scanSkills } from "./scan.js";
+import { scanSkills } from "../../../packages/core/src/scan/scan.js";
 
 let root: string;
 

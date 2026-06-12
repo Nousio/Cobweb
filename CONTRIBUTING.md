@@ -9,6 +9,7 @@ Cobweb is an npm workspace monorepo. The governance core stays free of transport
 - `packages/cli` — the `cobweb` / `cw` commands.
 - `packages/mcp` — the MCP stdio server, which exposes governance and explainable skill routing tools by forwarding to the daemon.
 - `packages/cobweb` — the public aggregate package that bundles the others behind the `cobweb`, `cw`, `cobwebd`, and `cobweb-mcp` binaries.
+- `test` — unit and integration tests, organized by package and feature area; parser compatibility fixtures live under `test/fixtures/skills`.
 - `examples/skills` — smoke-test skills covering normal, duplicate, escaping, high-risk, and policy-difference cases.
 
 ## Local Development
@@ -26,6 +27,27 @@ Run the CLI from source without building first:
 npm run dev:cli -- scan examples/skills
 ```
 
+## Development-only Files
+
+Tests and release verification never ship to users. The following are dev/CI-only and are excluded from every published package:
+
+- `test/**/*.test.ts` — unit and integration tests, centralized under the root `test` directory.
+- `test/fixtures/skills` — parser compatibility fixtures for the agentskills.io / Agent Skills format.
+- `vitest.config.ts` — test runner configuration.
+- `scripts/` — release packaging (`pack-release.sh`), install smoke (`smoke-install.sh`), and the publish guard (`verify-pack.sh`).
+- `.github/` and `examples/skills` — CI workflows and smoke fixtures.
+
+Two layers keep them out of the published artifact: tests live outside every package `src` tree, and each package `package.json` uses a `files` allowlist that ships only `dist/**` (plus the aggregate `README.md`). The smoke test (`npm run smoke:install`) is a local/CI verification step, not a publish requirement.
+
+Keep `examples/skills` for smoke checks and user-facing examples. Do not place parser compatibility matrices there; use `test/fixtures/skills` so tests and examples keep separate responsibilities.
+
+Run the publish guard to assert no test, `src`, or dev-only file would be published:
+
+```bash
+npm run build        # produce dist for each package
+npm run verify:pack  # fail if any package would ship test/src/dev files
+```
+
 ## Continuous Integration
 
-`.github/workflows/ci.yml` runs the typecheck, the test suite, CLI and daemon smoke checks, and an install smoke test against the packed aggregate tarball on every PR.
+`.github/workflows/ci.yml` runs the typecheck, the publish guard, the test suite, CLI and daemon smoke checks, and an install smoke test against the packed aggregate tarball on every PR.

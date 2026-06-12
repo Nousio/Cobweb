@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WriterQueue } from "./queue.js";
+import { WriterQueue } from "../../../packages/core/src/writer/queue.js";
 
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 

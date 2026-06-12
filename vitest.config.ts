@@ -12,12 +12,12 @@ export default defineConfig({
     ],
   },
   test: {
-    include: ["packages/**/*.test.ts"],
+    include: ["test/**/*.test.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
       include: ["packages/*/src/**/*.ts"],
-      exclude: ["packages/*/src/**/*.test.ts", "packages/*/src/index.ts", "packages/*/src/types.ts"],
+      exclude: ["test/**/*.test.ts", "packages/*/src/index.ts", "packages/*/src/types.ts"],
       thresholds: {
         statements: 70,
         branches: 70,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { ParsedResource, ParsedSkill } from "../types.js";
-import { auditParsedSkill } from "./audit.js";
-import { scanTextWithStaticRules } from "./static-rules.js";
+import type { ParsedResource, ParsedSkill } from "../../../packages/core/src/types.js";
+import { auditParsedSkill } from "../../../packages/core/src/audit/audit.js";
+import { scanTextWithStaticRules } from "../../../packages/core/src/audit/static-rules.js";
 
 function makeSkill(overrides: Partial<ParsedSkill> = {}): ParsedSkill {
   return {

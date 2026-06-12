@@ -1,3 +1,4 @@
+import { CobwebError } from "@cobweb/core";
 import type { DaemonMethods } from "@cobweb/daemon";
 import { callDaemon } from "@cobweb/daemon/client";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -93,19 +94,42 @@ export async function runMcpServer(): Promise<void> {
 export async function dispatchMcpTool(name: ToolName, args: unknown): Promise<unknown> {
   switch (name) {
     case "status":
-      return callDaemon("status", undefined);
+      return callDaemonForMcp("status", undefined);
     case "scan":
-      return callDaemon("scan", expectArgs<DaemonMethods["scan"]["params"]>(args));
+      return callDaemonForMcp("scan", expectArgs<DaemonMethods["scan"]["params"]>(args));
     case "audit":
-      return callDaemon("audit", expectArgs<DaemonMethods["audit"]["params"]>(args));
+      return callDaemonForMcp("audit", expectArgs<DaemonMethods["audit"]["params"]>(args));
     case "skill_search":
-      return callDaemon("skill_search", expectArgs<DaemonMethods["skill_search"]["params"]>(args));
+      return callDaemonForMcp("skill_search", expectArgs<DaemonMethods["skill_search"]["params"]>(args));
     case "skill_select":
-      return callDaemon("skill_select", expectArgs<DaemonMethods["skill_select"]["params"]>(args));
+      return callDaemonForMcp("skill_select", expectArgs<DaemonMethods["skill_select"]["params"]>(args));
     case "skill_context":
-      return callDaemon("skill_context", expectArgs<DaemonMethods["skill_context"]["params"]>(args));
+      return callDaemonForMcp("skill_context", expectArgs<DaemonMethods["skill_context"]["params"]>(args));
     case "skill_validate":
-      return callDaemon("skill_validate", expectArgs<DaemonMethods["skill_validate"]["params"]>(args));
+      return callDaemonForMcp("skill_validate", expectArgs<DaemonMethods["skill_validate"]["params"]>(args));
+  }
+}
+
+async function callDaemonForMcp<K extends keyof DaemonMethods>(
+  method: K,
+  params: DaemonMethods[K]["params"],
+): Promise<DaemonMethods[K]["result"]> {
+  try {
+    return await callDaemon(method, params);
+  } catch (error) {
+    if (error instanceof CobwebError && error.code === "DAEMON_UNAVAILABLE") {
+      throw new CobwebError(
+        error.code,
+        [
+          "Cobweb daemon is not reachable.",
+          "Start it with `cobweb daemon start`, then retry the MCP request.",
+          "If the daemon was installed globally, confirm `cobwebd` is on PATH and the MCP client uses the same COBWEB_DATA_DIR.",
+          `Cause: ${error.message}`,
+        ].join(" "),
+        { retryable: true, cause: error },
+      );
+    }
+    throw error;
   }
 }
 
