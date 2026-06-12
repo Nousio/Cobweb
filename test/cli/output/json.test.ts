@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { printError, printJson } from "./json.js";
+import { printError, printJson } from "../../../packages/cli/src/output/json.js";
 
 afterEach(() => {
   vi.restoreAllMocks();

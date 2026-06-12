@@ -4,9 +4,9 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createAppState } from "../app-state/app-state.js";
-import { callDaemon } from "./client.js";
-import { type DaemonServer, startIpcServer } from "./server.js";
+import { createAppState } from "../../../packages/daemon/src/app-state/app-state.js";
+import { callDaemon } from "../../../packages/daemon/src/ipc/client.js";
+import { type DaemonServer, startIpcServer } from "../../../packages/daemon/src/ipc/server.js";
 
 function sendRaw(socketPath: string, payload: string): Promise<string> {
   return new Promise((resolve, reject) => {

@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { defaultRuntimePaths } from "./paths.js";
+import { defaultRuntimePaths } from "../../../packages/core/src/runtime/paths.js";
 
 describe("defaultRuntimePaths", () => {
   it("falls back to the user data dir when env is empty", () => {

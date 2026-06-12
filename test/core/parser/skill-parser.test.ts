@@ -1,6 +1,10 @@
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { auditParsedSkill } from "../audit/audit.js";
-import { parseSkillMarkdown } from "./skill-parser.js";
+import { auditParsedSkill } from "../../../packages/core/src/audit/audit.js";
+import { parseSkillDirectory, parseSkillMarkdown } from "../../../packages/core/src/parser/skill-parser.js";
+
+const fixturesRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures/skills");
 
 describe("parseSkillMarkdown", () => {
   it("extracts frontmatter and flags escaping resources", () => {
@@ -200,6 +204,17 @@ icon: ./icon.png
 
     expect(parsed.resources.some((r) => r.mentionedBy === "image" && r.path === "./diagram.png")).toBe(true);
     expect(parsed.resources.some((r) => r.mentionedBy === "frontmatter" && r.path === "./icon.png")).toBe(true);
+  });
+
+  it("parses an Agent Skills fixture with bundled resource references", async () => {
+    const parsed = await parseSkillDirectory(resolve(fixturesRoot, "agentskills-basic"));
+    expect(parsed.name).toBe("agentskills-basic");
+    expect(parsed.description).toContain("Agent Skills package");
+    expect(parsed.frontmatter.metadata).toEqual({ category: "fixture" });
+    expect(parsed.methodSummaries[0]?.methodName).toBe("instructions");
+    expect(parsed.resources.map((resource) => resource.path)).toEqual(
+      expect.arrayContaining(["./references/guide.md", "./assets/icon.svg", "./scripts/validate.sh"]),
+    );
   });
 
   it("falls back to the directory name and warns when frontmatter is missing", () => {

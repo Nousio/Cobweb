@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { ParsedResource, ParsedSkill } from "../types.js";
-import { lintParsedSkill, lintSkillDirectory } from "./lint.js";
+import type { ParsedResource, ParsedSkill } from "../../../packages/core/src/types.js";
+import { lintParsedSkill, lintSkillDirectory } from "../../../packages/core/src/lint/lint.js";
 
 function makeSkill(rootPath: string, overrides: Partial<ParsedSkill> = {}): ParsedSkill {
   return {

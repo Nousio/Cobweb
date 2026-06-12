@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { NoopEmbeddingProvider } from "./embedding/provider.js";
-import { CobwebError, toErrorMessage } from "./errors.js";
-import { sha256 } from "./hash.js";
-import { builtinProviders } from "./providers/provider.js";
+import { NoopEmbeddingProvider } from "../../packages/core/src/embedding/provider.js";
+import { CobwebError, toErrorMessage } from "../../packages/core/src/errors.js";
+import { sha256 } from "../../packages/core/src/hash.js";
+import { builtinProviders } from "../../packages/core/src/providers/provider.js";
 
 describe("hash", () => {
   it("computes a stable sha256 hex digest", () => {

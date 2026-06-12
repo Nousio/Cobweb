@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ParsedSkill } from "../types.js";
-import { dedupSkills } from "./dedup.js";
+import type { ParsedSkill } from "../../../packages/core/src/types.js";
+import { dedupSkills } from "../../../packages/core/src/dedup/dedup.js";
 
 function makeSkill(overrides: Partial<ParsedSkill> & { rootPath: string }): ParsedSkill {
   return {

@@ -38,6 +38,9 @@ jobs:
       - name: Typecheck
         run: npm run check
 
+      - name: Verify publish guard
+        run: npm run verify:pack
+
       - name: Unit tests with coverage
         run: npm test -- --coverage
 

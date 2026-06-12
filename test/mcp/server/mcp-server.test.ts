@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CobwebError } from "../../../packages/core/src/errors.js";
 
 const callDaemon = vi.fn();
 
@@ -6,7 +7,7 @@ vi.mock("@cobweb/daemon/client", () => ({
   callDaemon: (...args: unknown[]) => callDaemon(...args),
 }));
 
-const { dispatchMcpTool, mcpTools } = await import("./mcp-server.js");
+const { dispatchMcpTool, mcpTools } = await import("../../../packages/mcp/src/server/mcp-server.js");
 
 afterEach(() => {
   callDaemon.mockReset();
@@ -33,5 +34,10 @@ describe("MCP server tool dispatch", () => {
     callDaemon.mockResolvedValue({ candidates: [] });
     await dispatchMcpTool("skill_search", { path: "/skills", query: "review", limit: 3 });
     expect(callDaemon).toHaveBeenCalledWith("skill_search", { path: "/skills", query: "review", limit: 3 });
+  });
+
+  it("returns actionable guidance when the daemon is unavailable", async () => {
+    callDaemon.mockRejectedValue(new CobwebError("DAEMON_UNAVAILABLE", "Cannot connect to cobwebd"));
+    await expect(dispatchMcpTool("status", {})).rejects.toThrow(/cobweb daemon start/);
   });
 });
