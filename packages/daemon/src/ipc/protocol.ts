@@ -1,18 +1,20 @@
 import type {
-  AuditResult,
   DbSkillStatus,
   ImportedSkillRecord,
+  IndexFreshness,
   PolicyCheckResult,
   ProjectionPlan,
   ProjectionResult,
   ScanResult,
   SkillContextResult,
+  SkillGraphResult,
   SkillSearchResult,
   SkillSelectResult,
   SkillValidateResult,
   VendorPlan,
   WriterQueueSnapshot,
 } from "@cobweb/core";
+import type { IndexCheckKind, WatcherState } from "../app-state/app-state.js";
 
 export interface JsonRpcRequest<TParams = unknown> {
   id: string;
@@ -42,9 +44,45 @@ export interface DaemonStatus {
   socketPath: string;
   dbPath: string;
   db: DbSkillStatus;
-  freshness: "fresh" | "rebuilding" | "degraded";
+  freshness: IndexFreshness;
   writer: WriterQueueSnapshot;
   lastError: string | null;
+  index: DaemonIndexStatus;
+}
+
+export interface DaemonIndexRootStatus {
+  root: string;
+  state: IndexFreshness;
+  reason: string;
+  lastIndexedAt: string | null;
+  lastIndexError: string | null;
+  lastCheckedAt: string | null;
+  lastVerifiedAt: string | null;
+  lastFullReconcileAt: string | null;
+  lastEventAt: string | null;
+  lastCheckKind: IndexCheckKind | null;
+  pending: boolean;
+  watching: boolean;
+  watcherState: WatcherState;
+  dirty: boolean;
+  fastPathEligible: boolean;
+  inFlight: boolean;
+  stalenessBudgetMs: number;
+}
+
+export interface DaemonIndexRecentTask {
+  root: string;
+  state: IndexFreshness;
+  reason: string;
+  at: string;
+}
+
+export interface DaemonIndexStatus {
+  roots: DaemonIndexRootStatus[];
+  watchRoots: string[];
+  indexedRoots: string[];
+  pendingRoots: string[];
+  recent: DaemonIndexRecentTask[];
 }
 
 export interface DaemonMethods {
@@ -55,10 +93,6 @@ export interface DaemonMethods {
   scan: {
     params: { path: string };
     result: ScanResult;
-  };
-  audit: {
-    params: { path: string };
-    result: AuditResult;
   };
   importSkill: {
     params: { path: string; canonicalDir?: string };
@@ -91,6 +125,10 @@ export interface DaemonMethods {
   skill_search: {
     params: { path: string; query: string; limit?: number };
     result: SkillSearchResult;
+  };
+  skill_graph: {
+    params: { path: string; maxDepth?: number; includeExternal?: boolean };
+    result: SkillGraphResult;
   };
   skill_select: {
     params: { path: string; query: string; limit?: number };

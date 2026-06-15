@@ -7,7 +7,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 
 type ToolName = keyof Pick<
   DaemonMethods,
-  "status" | "scan" | "audit" | "skill_search" | "skill_select" | "skill_context" | "skill_validate"
+  "status" | "scan" | "skill_graph" | "skill_search" | "skill_select" | "skill_context" | "skill_validate"
 >;
 
 export const mcpTools: Array<{ name: ToolName; description: string; inputSchema: Record<string, unknown> }> = [
@@ -22,13 +22,21 @@ export const mcpTools: Array<{ name: ToolName; description: string; inputSchema:
     inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
   },
   {
-    name: "audit",
-    description: "Audit a skill directory for risk findings.",
-    inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+    name: "skill_graph",
+    description: "Build a SkillGraph topology from a scan root without audit or risk judgment.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        maxDepth: { type: "number" },
+        includeExternal: { type: "boolean" },
+      },
+      required: ["path"],
+    },
   },
   {
     name: "skill_search",
-    description: "Search indexed skills with FTS-backed match reasons and governance signals.",
+    description: "Search indexed skills with FTS-backed match reasons.",
     inputSchema: {
       type: "object",
       properties: { path: { type: "string" }, query: { type: "string" }, limit: { type: "number" } },
@@ -37,7 +45,7 @@ export const mcpTools: Array<{ name: ToolName; description: string; inputSchema:
   },
   {
     name: "skill_select",
-    description: "Select the best low-risk indexed skill for a query and explain the recommendation.",
+    description: "Select the best indexed skill for a query and explain the recommendation.",
     inputSchema: {
       type: "object",
       properties: { path: { type: "string" }, query: { type: "string" }, limit: { type: "number" } },
@@ -46,12 +54,12 @@ export const mcpTools: Array<{ name: ToolName; description: string; inputSchema:
   },
   {
     name: "skill_context",
-    description: "Return method, resource, policy, audit, and lint context for a skill.",
+    description: "Return method, resource, policy, and lint context for a skill.",
     inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
   },
   {
     name: "skill_validate",
-    description: "Validate a skill with lint, audit, policy, and indexed duplicate checks.",
+    description: "Validate a skill with lint, policy, and indexed duplicate checks.",
     inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
   },
 ];
@@ -97,8 +105,8 @@ export async function dispatchMcpTool(name: ToolName, args: unknown): Promise<un
       return callDaemonForMcp("status", undefined);
     case "scan":
       return callDaemonForMcp("scan", expectArgs<DaemonMethods["scan"]["params"]>(args));
-    case "audit":
-      return callDaemonForMcp("audit", expectArgs<DaemonMethods["audit"]["params"]>(args));
+    case "skill_graph":
+      return callDaemonForMcp("skill_graph", expectArgs<DaemonMethods["skill_graph"]["params"]>(args));
     case "skill_search":
       return callDaemonForMcp("skill_search", expectArgs<DaemonMethods["skill_search"]["params"]>(args));
     case "skill_select":

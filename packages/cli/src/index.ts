@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import {
-  auditParsedSkill,
+  buildSkillGraph,
   createMergePlan,
   createVendorPlan,
   dedupSkills,
@@ -34,6 +34,15 @@ program
   });
 
 program
+  .command("graph")
+  .argument("[path]", "directory to graph", ".")
+  .option("--max-depth <number>", "maximum graph traversal depth", Number.parseInt)
+  .option("--no-external", "omit external URL nodes")
+  .action(async (path: string, options: { maxDepth?: number; external?: boolean }) => {
+    printJson(await buildSkillGraph(path, { maxDepth: options.maxDepth, includeExternal: options.external }));
+  });
+
+program
   .command("lint")
   .argument("[skill]", "skill root directory", ".")
   .option("--fix", "apply safe automatic fixes")
@@ -46,18 +55,6 @@ program
   });
 
 program
-  .command("audit")
-  .argument("<skill>", "skill root directory")
-  .option("--strict", "exit non-zero for high or blocked risk")
-  .action(async (skill: string, options: { strict?: boolean }) => {
-    const result = auditParsedSkill(await parseSkillDirectory(skill));
-    printJson(result);
-    if (options.strict && ["high", "blocked"].includes(result.riskLevel)) {
-      process.exitCode = 2;
-    }
-  });
-
-program
   .command("import")
   .argument("<path>", "skill root directory")
   .option("--dry-run", "preview import without writing", true)
@@ -66,7 +63,6 @@ program
   .action(async (path: string, options: { write?: boolean; canonical?: string }) => {
     if (!options.write) {
       const parsed = await parseSkillDirectory(path);
-      const audit = auditParsedSkill(parsed);
       printJson({
         dryRun: true,
         candidate: {
@@ -77,7 +73,6 @@ program
           resources: parsed.resources,
           warnings: parsed.warnings,
         },
-        audit,
         canonical: options.canonical ?? null,
       });
       return;

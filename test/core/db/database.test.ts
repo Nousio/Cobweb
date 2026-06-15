@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { importCanonicalSkill } from "../../../packages/core/src/canonical/store.js";
-import type { AuditResult, ParsedSkill } from "../../../packages/core/src/types.js";
 import { CobwebDatabase } from "../../../packages/core/src/db/database.js";
+import type { ParsedSkill } from "../../../packages/core/src/types.js";
 
 const open: CobwebDatabase[] = [];
 
@@ -35,8 +35,6 @@ function makeSkill(rootPath: string, overrides: Partial<ParsedSkill> = {}): Pars
   };
 }
 
-const audit: AuditResult = { riskLevel: "low", findings: [] };
-
 afterEach(() => {
   while (open.length > 0) {
     open.pop()?.close();
@@ -51,15 +49,14 @@ describe("CobwebDatabase", () => {
 
   it("starts with empty skill status", async () => {
     const db = await tempDb();
-    expect(db.skillStatus()).toEqual({ total: 0, highRisk: 0, blocked: 0 });
+    expect(db.skillStatus()).toEqual({ total: 0 });
   });
 
   it("upserts a skill and reports it in status", async () => {
     const db = await tempDb();
-    const record = db.upsertSkill(makeSkill("/skills/review"), audit);
+    const record = db.upsertSkill(makeSkill("/skills/review"));
 
     expect(record.name).toBe("review");
-    expect(record.riskLevel).toBe("low");
     expect(record.id).toHaveLength(64);
     expect(db.skillStatus().total).toBe(1);
   });
@@ -82,7 +79,6 @@ describe("CobwebDatabase", () => {
           },
         ],
       }),
-      audit,
     );
 
     const result = db.searchSkills("diffs");
@@ -93,7 +89,7 @@ describe("CobwebDatabase", () => {
 
   it("finds duplicate candidates from the indexed corpus", async () => {
     const db = await tempDb();
-    db.upsertSkill(makeSkill("/skills/review", { name: "review", description: "Review pull requests" }), audit);
+    db.upsertSkill(makeSkill("/skills/review", { name: "review", description: "Review pull requests" }));
 
     const duplicates = db.findDuplicateCandidates(
       makeSkill("/skills/new-review", {
@@ -111,7 +107,6 @@ describe("CobwebDatabase", () => {
     const db = await tempDb();
     db.upsertSkill(
       makeSkill("/skills/pr", { name: "pr reviewer", description: "review pull requests before merge" }),
-      audit,
     );
 
     const duplicates = db.findDuplicateCandidates(
@@ -130,7 +125,6 @@ describe("CobwebDatabase", () => {
     const db = await tempDb();
     db.upsertSkill(
       makeSkill("/skills/deploy", { name: "deploy infra", description: "terraform pipeline for release" }),
-      audit,
     );
 
     const duplicates = db.findDuplicateCandidates(
@@ -146,9 +140,9 @@ describe("CobwebDatabase", () => {
 
   it("prunes skills removed from a root while keeping other roots", async () => {
     const db = await tempDb();
-    const a = db.upsertSkill(makeSkill("/skills/a", { name: "alpha", contentHash: "a" }), audit);
-    const b = db.upsertSkill(makeSkill("/skills/b", { name: "beta", contentHash: "b" }), audit);
-    db.upsertSkill(makeSkill("/other/c", { name: "gamma", contentHash: "c" }), audit);
+    const a = db.upsertSkill(makeSkill("/skills/a", { name: "alpha", contentHash: "a" }));
+    const b = db.upsertSkill(makeSkill("/skills/b", { name: "beta", contentHash: "b" }));
+    db.upsertSkill(makeSkill("/other/c", { name: "gamma", contentHash: "c" }));
 
     const removed = db.pruneSkillsUnderRoot("/skills", [a.id]);
 
@@ -159,10 +153,47 @@ describe("CobwebDatabase", () => {
     expect(db.searchSkills("gamma")[0]?.name).toBe("gamma");
   });
 
+  it("lists content hashes under a root", async () => {
+    const db = await tempDb();
+    db.upsertSkill(makeSkill("/skills/a", { name: "alpha", contentHash: "hash-a" }));
+    db.upsertSkill(makeSkill("/other/b", { name: "beta", contentHash: "hash-b" }));
+
+    expect(db.listSkillContentHashesUnderRoot("/skills")).toEqual([
+      expect.objectContaining({ path: "/skills/a", contentHash: "hash-a" }),
+    ]);
+  });
+
+  it("reconciles a root in one transaction", async () => {
+    const db = await tempDb();
+    db.upsertSkill(makeSkill("/skills/a", { name: "alpha", contentHash: "old-a" }));
+    db.upsertSkill(makeSkill("/skills/stale", { name: "stale", contentHash: "stale" }));
+
+    const result = db.reconcileSkillRoot(
+      "/skills",
+      [makeSkill("/skills/a", { name: "alpha", description: "Updated", contentHash: "new-a" })],
+      ["/skills/a"],
+    );
+
+    expect(result.imported[0]?.contentHash).toBe("new-a");
+    expect(result.pruned).toHaveLength(1);
+    expect(db.searchSkills("stale")).toHaveLength(0);
+    expect(db.listSkillContentHashesUnderRoot("/skills")[0]?.contentHash).toBe("new-a");
+  });
+
+  it("stores runtime state for daemon ledgers", async () => {
+    const db = await tempDb();
+    db.setRuntimeState("index.roots.v1", { version: 1, roots: [{ root: "/skills", lastIndexedAt: null }] });
+
+    expect(db.getRuntimeState<{ roots: Array<{ root: string }> }>("index.roots.v1")?.roots[0]?.root).toBe("/skills");
+
+    db.deleteRuntimeState("index.roots.v1");
+    expect(db.getRuntimeState("index.roots.v1")).toBeNull();
+  });
+
   it("limits search results to the requested root", async () => {
     const db = await tempDb();
-    db.upsertSkill(makeSkill("/skills/a", { name: "shared", description: "review from skills", contentHash: "a" }), audit);
-    db.upsertSkill(makeSkill("/other/b", { name: "shared", description: "review from other", contentHash: "b" }), audit);
+    db.upsertSkill(makeSkill("/skills/a", { name: "shared", description: "review from skills", contentHash: "a" }));
+    db.upsertSkill(makeSkill("/other/b", { name: "shared", description: "review from other", contentHash: "b" }));
 
     const result = db.searchSkills("shared", { root: "/skills" });
 
@@ -171,8 +202,8 @@ describe("CobwebDatabase", () => {
 
   it("does not leak sibling roots through LIKE wildcards", async () => {
     const db = await tempDb();
-    db.upsertSkill(makeSkill("/repo/my_skills/a", { name: "alpha", description: "review work", contentHash: "a" }), audit);
-    db.upsertSkill(makeSkill("/repo/myXskills/b", { name: "beta", description: "review work", contentHash: "b" }), audit);
+    db.upsertSkill(makeSkill("/repo/my_skills/a", { name: "alpha", description: "review work", contentHash: "a" }));
+    db.upsertSkill(makeSkill("/repo/myXskills/b", { name: "beta", description: "review work", contentHash: "b" }));
 
     const result = db.searchSkills("review", { root: "/repo/my_skills" });
 
@@ -181,22 +212,23 @@ describe("CobwebDatabase", () => {
 
   it("is idempotent for the same root path", async () => {
     const db = await tempDb();
-    db.upsertSkill(makeSkill("/skills/review"), audit);
-    db.upsertSkill(makeSkill("/skills/review", { description: "Updated" }), audit);
+    db.upsertSkill(makeSkill("/skills/review"));
+    db.upsertSkill(makeSkill("/skills/review", { description: "Updated" }));
 
     expect(db.skillStatus().total).toBe(1);
   });
 
-  it("counts high-risk and blocked skills", async () => {
+  it("reports schema and FTS health checks", async () => {
     const db = await tempDb();
-    db.upsertSkill(makeSkill("/skills/a"), { riskLevel: "high", findings: [] });
-    db.upsertSkill(makeSkill("/skills/b"), { riskLevel: "blocked", findings: [] });
-    db.upsertSkill(makeSkill("/skills/c"), { riskLevel: "low", findings: [] });
+    db.upsertSkill(makeSkill("/skills/a", { name: "alpha", contentHash: "a" }));
 
-    const status = db.skillStatus();
-    expect(status.total).toBe(3);
-    expect(status.highRisk).toBe(1);
-    expect(status.blocked).toBe(1);
+    const checks = db.schemaHealthChecks();
+
+    expect(checks.find((check) => check.name === "sqlite_quick_check")?.ok).toBe(true);
+    expect(checks.find((check) => check.name === "sqlite_foreign_keys")?.ok).toBe(true);
+    expect(checks.find((check) => check.name === "methods_table")?.ok).toBe(true);
+    expect(checks.find((check) => check.name === "skill_search_fts")?.ok).toBe(true);
+    expect(checks.find((check) => check.name === "fts_consistency")?.ok).toBe(true);
   });
 
   it("replaces resources on re-import", async () => {
@@ -208,7 +240,6 @@ describe("CobwebDatabase", () => {
           { path: "./b.sh", isExternal: false, isAbsolute: false, escapesRoot: false, mentionedBy: "script-reference" },
         ],
       }),
-      audit,
     );
     db.upsertSkill(
       makeSkill("/skills/review", {
@@ -216,7 +247,6 @@ describe("CobwebDatabase", () => {
           { path: "./c.sh", isExternal: false, isAbsolute: false, escapesRoot: false, mentionedBy: "script-reference" },
         ],
       }),
-      audit,
     );
 
     expect(db.skillStatus().total).toBe(1);
@@ -227,8 +257,8 @@ describe("CobwebDatabase", () => {
     const db = await tempDb();
     const records = db.bulkUpsertSkills(
       [
-        { skill: makeSkill("/skills/bulk-a", { name: "a", contentHash: "a" }), audit },
-        { skill: makeSkill("/skills/bulk-b", { name: "b", contentHash: "b" }), audit },
+        makeSkill("/skills/bulk-a", { name: "a", contentHash: "a" }),
+        makeSkill("/skills/bulk-b", { name: "b", contentHash: "b" }),
       ],
       { chunkSize: 1 },
     );
@@ -248,7 +278,7 @@ describe("CobwebDatabase", () => {
     await importCanonicalSkill(source, { canonicalDir: join(root, "canonical"), lockfilePath });
 
     const db = await tempDb();
-    db.upsertSkill(makeSkill(join(root, "stale"), { name: "stale", contentHash: "stale" }), audit);
+    db.upsertSkill(makeSkill(join(root, "stale"), { name: "stale", contentHash: "stale" }));
     const records = await db.rebuildFromLockfile(lockfilePath);
     expect(records[0]?.name).toBe("rebuild");
     expect(db.skillStatus().total).toBe(1);

@@ -1,5 +1,3 @@
-export type RiskLevel = "low" | "medium" | "high" | "blocked";
-
 export type IndexFreshness = "fresh" | "rebuilding" | "degraded";
 
 export type SourceType = "project" | "global" | "imported" | "unknown";
@@ -29,7 +27,7 @@ export interface ParsedResource {
   isExternal: boolean;
   isAbsolute: boolean;
   escapesRoot: boolean;
-  mentionedBy: "markdown-link" | "image" | "script-reference" | "frontmatter";
+  mentionedBy: "markdown-link" | "image" | "script-reference" | "frontmatter" | "standard-resource";
 }
 
 export interface ParsedPolicy {
@@ -71,7 +69,6 @@ export interface SkillCandidate {
   kind: "skill_dir";
   name: string;
   description: string;
-  riskLevel: RiskLevel;
   duplicateOf: string | null;
   warnings: string[];
 }
@@ -115,19 +112,6 @@ export interface SkillSelectResult {
     name: string;
     reason: string;
   }>;
-  risks: AuditFinding[];
-}
-
-export interface AuditFinding {
-  code: string;
-  message: string;
-  severity: RiskLevel;
-  path?: string;
-}
-
-export interface AuditResult {
-  riskLevel: RiskLevel;
-  findings: AuditFinding[];
 }
 
 export interface SkillContextResult {
@@ -140,7 +124,6 @@ export interface SkillContextResult {
   policy: ParsedPolicy & {
     check: PolicyCheckResult;
   };
-  audit: AuditResult;
   lint: LintResult;
 }
 
@@ -155,10 +138,47 @@ export interface DuplicateCandidate {
 
 export interface SkillValidateResult {
   valid: boolean;
-  audit: AuditResult;
   lint: LintResult;
   policy: PolicyCheckResult;
   duplicates: DuplicateCandidate[];
+}
+
+export type SkillGraphNodeKind = "scan_root" | "skill" | "resource" | "external";
+export type SkillGraphEdgeKind = "contains" | "references" | "references_skill";
+
+export interface SkillGraphNode {
+  id: string;
+  kind: SkillGraphNodeKind;
+  path: string;
+  relativePath: string;
+  depth: number;
+  name?: string;
+}
+
+export interface SkillGraphEdge {
+  from: string;
+  to: string;
+  kind: SkillGraphEdgeKind;
+  via?: ParsedResource["mentionedBy"];
+  rawPath?: string;
+  resolvedPath?: string;
+  unresolved?: boolean;
+  external?: boolean;
+}
+
+export interface SkillGraphPath {
+  nodes: string[];
+  leafKind: SkillGraphNodeKind;
+}
+
+export interface SkillGraphResult {
+  root: string;
+  scanRootIsSkill: boolean;
+  nodes: SkillGraphNode[];
+  edges: SkillGraphEdge[];
+  paths: SkillGraphPath[];
+  warnings: string[];
+  truncated: boolean;
 }
 
 export interface DedupMatch {
@@ -180,7 +200,6 @@ export interface CanonicalSkill {
   canonicalPath?: string;
   sourceType: SourceType;
   contentHash: string;
-  riskLevel: RiskLevel;
   provenance?: Record<string, unknown>;
 }
 

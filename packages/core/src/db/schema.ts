@@ -1,4 +1,4 @@
-export const schemaVersion = 2;
+export const schemaVersion = 3;
 
 export const schemaSql = [
   `CREATE TABLE IF NOT EXISTS skills (
@@ -13,7 +13,6 @@ export const schemaSql = [
     implicit_invocation INTEGER,
     self_contained INTEGER,
     trust_level TEXT,
-    risk_level TEXT,
     content_hash TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
@@ -23,7 +22,6 @@ export const schemaSql = [
     resource_type TEXT NOT NULL,
     path TEXT NOT NULL,
     is_external INTEGER NOT NULL,
-    risk_flags_json TEXT,
     content_hash TEXT,
     FOREIGN KEY(skill_id) REFERENCES skills(id) ON DELETE CASCADE
   )`,
@@ -59,14 +57,6 @@ export const schemaSql = [
     content_hash TEXT,
     drift INTEGER NOT NULL DEFAULT 0,
     last_sync_at TEXT,
-    FOREIGN KEY(skill_id) REFERENCES skills(id) ON DELETE CASCADE
-  )`,
-  `CREATE TABLE IF NOT EXISTS audit_results (
-    id TEXT PRIMARY KEY,
-    skill_id TEXT NOT NULL,
-    risk_level TEXT NOT NULL,
-    findings_json TEXT NOT NULL,
-    audited_at TEXT NOT NULL,
     FOREIGN KEY(skill_id) REFERENCES skills(id) ON DELETE CASCADE
   )`,
   `CREATE TABLE IF NOT EXISTS schema_migrations (

@@ -47,7 +47,6 @@ jobs:
       - name: CLI smoke checks
         run: |
           npm run dev:cli -- scan examples/skills
-          npm run dev:cli -- audit examples/skills/high-risk-script
           npm run dev:cli -- dedup examples/skills
           npm run dev:cli -- import examples/skills/normal-review
 

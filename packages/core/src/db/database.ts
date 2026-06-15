@@ -2,13 +2,11 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { auditParsedSkill } from "../audit/audit.js";
 import { readCobwebLockfile } from "../canonical/lockfile.js";
 import { jaccardSimilarity, tokenizeText } from "../dedup/similarity.js";
 import { sha256 } from "../hash.js";
 import { parseSkillDirectory } from "../parser/skill-parser.js";
 import type {
-  AuditResult,
   DuplicateCandidate,
   ParsedMethodSummary,
   ParsedSkill,
@@ -21,15 +19,12 @@ import { schemaSql, schemaVersion, sqlitePragmas } from "./schema.js";
 
 export interface DbSkillStatus {
   total: number;
-  highRisk: number;
-  blocked: number;
 }
 
 export interface ImportedSkillRecord {
   id: string;
   name: string;
   contentHash: string;
-  riskLevel: string;
   duplicates?: DuplicateCandidate[];
 }
 
@@ -42,12 +37,28 @@ export interface SkillSearchOptions {
   root?: string;
 }
 
+export interface SkillContentHashRecord {
+  id: string;
+  path: string;
+  contentHash: string;
+}
+
+export interface SkillRootReconcileResult {
+  imported: ImportedSkillRecord[];
+  pruned: string[];
+}
+
+export interface DbHealthCheck {
+  name: string;
+  ok: boolean;
+  message?: string;
+}
+
 interface SearchRow {
   id: string;
   name: string;
   description: string | null;
   root_path: string;
-  risk_level: string | null;
   rank: number | null;
   name_snippet: string | null;
   description_snippet: string | null;
@@ -74,6 +85,44 @@ export class CobwebDatabase {
     return row?.integrity_check ?? "unknown";
   }
 
+  quickCheck(): string {
+    const row = this.db.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
+    return row?.quick_check ?? "unknown";
+  }
+
+  foreignKeyViolations(): number {
+    return this.db.prepare("PRAGMA foreign_key_check").all().length;
+  }
+
+  schemaHealthChecks(): DbHealthCheck[] {
+    const quickCheck = this.quickCheck();
+    const foreignKeyViolations = this.foreignKeyViolations();
+    const hasMethods = this.objectExists("methods");
+    const hasFts = this.objectExists("skill_search_fts");
+    const currentSchemaVersion = this.currentSchemaVersion();
+    const checks: DbHealthCheck[] = [
+      {
+        name: "schema_version",
+        ok: currentSchemaVersion === schemaVersion,
+        message: `current ${currentSchemaVersion}, expected ${schemaVersion}`,
+      },
+      { name: "sqlite_quick_check", ok: quickCheck === "ok", message: quickCheck },
+      {
+        name: "sqlite_foreign_keys",
+        ok: foreignKeyViolations === 0,
+        message: foreignKeyViolations === 0 ? "ok" : `${foreignKeyViolations} violation(s)`,
+      },
+      { name: "methods_table", ok: hasMethods, message: hasMethods ? "present" : "missing" },
+      { name: "skill_search_fts", ok: hasFts, message: hasFts ? "present" : "missing" },
+    ];
+
+    if (hasFts) {
+      checks.push(this.ftsConsistencyCheck());
+    }
+
+    return checks;
+  }
+
   checkpointWal(): string {
     const row = this.db.prepare("PRAGMA wal_checkpoint(RESTART)").get() as
       | { busy?: number; log?: number; checkpointed?: number }
@@ -83,26 +132,59 @@ export class CobwebDatabase {
 
   skillStatus(): DbSkillStatus {
     const row = this.db
-      .prepare(
-        `SELECT
-          COUNT(*) AS total,
-          SUM(CASE WHEN risk_level = 'high' THEN 1 ELSE 0 END) AS highRisk,
-          SUM(CASE WHEN risk_level = 'blocked' THEN 1 ELSE 0 END) AS blocked
-        FROM skills`,
-      )
-      .get() as { total?: number; highRisk?: number | null; blocked?: number | null } | undefined;
+      .prepare("SELECT COUNT(*) AS total FROM skills")
+      .get() as { total?: number } | undefined;
 
     return {
       total: row?.total ?? 0,
-      highRisk: row?.highRisk ?? 0,
-      blocked: row?.blocked ?? 0,
     };
   }
 
-  upsertSkill(skill: ParsedSkill, audit: AuditResult): ImportedSkillRecord {
+  listSkillContentHashesUnderRoot(root: string): SkillContentHashRecord[] {
+    const prefix = normalizePath(root).replace(/\/+$/, "");
+    const rows = this.db
+      .prepare("SELECT id, root_path, content_hash FROM skills")
+      .all() as Array<{ id: string; root_path: string; content_hash: string }>;
+
+    return rows
+      .filter((row) => isUnderRoot(normalizePath(row.root_path), prefix))
+      .map((row) => ({
+        id: row.id,
+        path: row.root_path,
+        contentHash: row.content_hash,
+      }));
+  }
+
+  getRuntimeState<T>(key: string): T | null {
+    const row = this.db.prepare("SELECT value_json FROM runtime_state WHERE key = ?").get(key) as
+      | { value_json?: string }
+      | undefined;
+    if (!row?.value_json) {
+      return null;
+    }
+    return JSON.parse(row.value_json) as T;
+  }
+
+  setRuntimeState(key: string, value: unknown): void {
+    this.db
+      .prepare(
+        `INSERT INTO runtime_state (key, value_json, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value_json = excluded.value_json,
+          updated_at = excluded.updated_at`,
+      )
+      .run(key, JSON.stringify(value), new Date().toISOString());
+  }
+
+  deleteRuntimeState(key: string): void {
+    this.db.prepare("DELETE FROM runtime_state WHERE key = ?").run(key);
+  }
+
+  upsertSkill(skill: ParsedSkill): ImportedSkillRecord {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const record = this.upsertSkillInTransaction(skill, audit);
+      const record = this.upsertSkillInTransaction(skill);
       this.db.exec("COMMIT");
       return record;
     } catch (error) {
@@ -111,7 +193,7 @@ export class CobwebDatabase {
     }
   }
 
-  bulkUpsertSkills(records: Array<{ skill: ParsedSkill; audit: AuditResult }>, options: BulkImportOptions = {}): ImportedSkillRecord[] {
+  bulkUpsertSkills(records: ParsedSkill[], options: BulkImportOptions = {}): ImportedSkillRecord[] {
     const chunkSize = options.chunkSize ?? 50;
     const imported: ImportedSkillRecord[] = [];
 
@@ -120,7 +202,7 @@ export class CobwebDatabase {
       this.db.exec("BEGIN IMMEDIATE");
       try {
         for (const record of chunk) {
-          imported.push(this.upsertSkillInTransaction(record.skill, record.audit));
+          imported.push(this.upsertSkillInTransaction(record));
         }
         this.db.exec("COMMIT");
       } catch (error) {
@@ -132,14 +214,39 @@ export class CobwebDatabase {
     return imported;
   }
 
+  reconcileSkillRoot(
+    root: string,
+    records: ParsedSkill[],
+    currentSkillPaths: string[],
+  ): SkillRootReconcileResult {
+    const prefix = normalizePath(root).replace(/\/+$/, "");
+    const keep = new Set(currentSkillPaths.map((path) => sha256(path)));
+    const imported: ImportedSkillRecord[] = [];
+
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const record of records) {
+        imported.push(this.upsertSkillInTransaction(record));
+        keep.add(sha256(record.rootPath));
+      }
+
+      const rows = this.db.prepare("SELECT id, root_path FROM skills").all() as Array<{ id: string; root_path: string }>;
+      const staleIds = rows
+        .filter((row) => isUnderRoot(normalizePath(row.root_path), prefix) && !keep.has(row.id))
+        .map((row) => row.id);
+      this.deleteSkillsInTransaction(staleIds);
+
+      this.db.exec("COMMIT");
+      return { imported, pruned: staleIds };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   async rebuildFromLockfile(lockfilePath: string, options: BulkImportOptions = {}): Promise<ImportedSkillRecord[]> {
     const lockfile = await readCobwebLockfile(lockfilePath);
-    const records = await Promise.all(
-      lockfile.skills.map(async (record) => {
-        const skill = await parseSkillDirectory(record.canonicalPath);
-        return { skill, audit: auditParsedSkill(skill) };
-      }),
-    );
+    const records = await Promise.all(lockfile.skills.map((record) => parseSkillDirectory(record.canonicalPath)));
     const imported = this.bulkUpsertSkills(records, options);
     this.pruneSkillsOutside(imported.map((record) => record.id));
     return imported;
@@ -164,7 +271,6 @@ export class CobwebDatabase {
           s.name,
           s.description,
           s.root_path,
-          s.risk_level,
           bm25(skill_search_fts, 0.0, 5.0, 3.0, 1.0, 2.0, 4.0) AS rank,
           snippet(skill_search_fts, 1, '[', ']', '...', 12) AS name_snippet,
           snippet(skill_search_fts, 2, '[', ']', '...', 12) AS description_snippet,
@@ -187,7 +293,6 @@ export class CobwebDatabase {
         kind: "skill_dir",
         name: row.name,
         description: row.description ?? "",
-        riskLevel: riskLevel(row.risk_level),
         duplicateOf: null,
         warnings: [],
         score: scoreSearchRow(row, matchReasons),
@@ -276,7 +381,7 @@ export class CobwebDatabase {
       );
   }
 
-  private upsertSkillInTransaction(skill: ParsedSkill, audit: AuditResult): ImportedSkillRecord {
+  private upsertSkillInTransaction(skill: ParsedSkill): ImportedSkillRecord {
     const skillId = sha256(skill.rootPath);
     const updatedAt = new Date().toISOString();
 
@@ -294,10 +399,9 @@ export class CobwebDatabase {
             implicit_invocation,
             self_contained,
             trust_level,
-            risk_level,
             content_hash,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             description = excluded.description,
@@ -306,7 +410,6 @@ export class CobwebDatabase {
             paths_json = excluded.paths_json,
             implicit_invocation = excluded.implicit_invocation,
             self_contained = excluded.self_contained,
-            risk_level = excluded.risk_level,
             content_hash = excluded.content_hash,
             updated_at = excluded.updated_at`,
       )
@@ -322,7 +425,6 @@ export class CobwebDatabase {
         booleanToSql(skill.policy.implicitInvocation),
         booleanToSql(skill.policy.selfContained),
         null,
-        audit.riskLevel,
         skill.contentHash,
         updatedAt,
       );
@@ -335,9 +437,8 @@ export class CobwebDatabase {
           resource_type,
           path,
           is_external,
-          risk_flags_json,
           content_hash
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
     );
     for (const resource of skill.resources) {
       insertResource.run(
@@ -346,26 +447,9 @@ export class CobwebDatabase {
         resource.mentionedBy,
         resource.path,
         resource.isExternal ? 1 : 0,
-        JSON.stringify({
-          escapesRoot: resource.escapesRoot,
-          isAbsolute: resource.isAbsolute,
-        }),
         null,
       );
     }
-
-    this.db.prepare("DELETE FROM audit_results WHERE skill_id = ?").run(skillId);
-    this.db
-      .prepare(
-        `INSERT INTO audit_results (
-            id,
-            skill_id,
-            risk_level,
-            findings_json,
-            audited_at
-          ) VALUES (?, ?, ?, ?, ?)`,
-      )
-      .run(randomUUID(), skillId, audit.riskLevel, JSON.stringify(audit.findings), updatedAt);
 
     this.upsertMethodsInTransaction(skillId, skill.methodSummaries);
     this.upsertSearchIndexInTransaction(skillId, skill);
@@ -374,7 +458,6 @@ export class CobwebDatabase {
       id: skillId,
       name: skill.name,
       contentHash: skill.contentHash,
-      riskLevel: audit.riskLevel,
     };
   }
 
@@ -432,16 +515,24 @@ export class CobwebDatabase {
 
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const deleteFts = this.db.prepare("DELETE FROM skill_search_fts WHERE skill_id = ?");
-      const deleteSkill = this.db.prepare("DELETE FROM skills WHERE id = ?");
-      for (const id of skillIds) {
-        deleteFts.run(id);
-        deleteSkill.run(id);
-      }
+      this.deleteSkillsInTransaction(skillIds);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  private deleteSkillsInTransaction(skillIds: string[]): void {
+    if (skillIds.length === 0) {
+      return;
+    }
+
+    const deleteFts = this.db.prepare("DELETE FROM skill_search_fts WHERE skill_id = ?");
+    const deleteSkill = this.db.prepare("DELETE FROM skills WHERE id = ?");
+    for (const id of skillIds) {
+      deleteFts.run(id);
+      deleteSkill.run(id);
     }
   }
 
@@ -466,6 +557,58 @@ export class CobwebDatabase {
         skill.sections.map((section) => section.title).join("\n"),
         skill.methodSummaries.map((summary) => `${summary.methodName}\n${summary.summary}\n${summary.triggerTerms.join(" ")}`).join("\n\n"),
       );
+  }
+
+  private objectExists(name: string): boolean {
+    const row = this.db
+      .prepare("SELECT 1 AS present FROM sqlite_master WHERE name = ? LIMIT 1")
+      .get(name) as { present?: number } | undefined;
+    return row?.present === 1;
+  }
+
+  private currentSchemaVersion(): number {
+    const row = this.db
+      .prepare("SELECT MAX(version) AS version FROM schema_migrations")
+      .get() as { version?: number | null } | undefined;
+    return row?.version ?? 0;
+  }
+
+  private ftsConsistencyCheck(): DbHealthCheck {
+    const row = this.db
+      .prepare(
+        `SELECT
+          (SELECT COUNT(*) FROM skills) AS skillCount,
+          (SELECT COUNT(DISTINCT skill_id) FROM skill_search_fts) AS ftsSkillCount,
+          (SELECT COUNT(*)
+            FROM skills s
+            LEFT JOIN skill_search_fts f ON f.skill_id = s.id
+            WHERE f.skill_id IS NULL) AS missingFts,
+          (SELECT COUNT(*)
+            FROM skill_search_fts f
+            LEFT JOIN skills s ON s.id = f.skill_id
+            WHERE s.id IS NULL) AS staleFts`,
+      )
+      .get() as
+      | {
+        skillCount?: number;
+        ftsSkillCount?: number;
+        missingFts?: number;
+        staleFts?: number;
+      }
+      | undefined;
+    const skillCount = row?.skillCount ?? 0;
+    const ftsSkillCount = row?.ftsSkillCount ?? 0;
+    const missingFts = row?.missingFts ?? 0;
+    const staleFts = row?.staleFts ?? 0;
+    const ok = skillCount === ftsSkillCount && missingFts === 0 && staleFts === 0;
+
+    return {
+      name: "fts_consistency",
+      ok,
+      message: ok
+        ? `${skillCount} indexed skill(s)`
+        : `${missingFts} skill(s) missing FTS rows, ${staleFts} stale FTS row(s); run \`cobweb daemon repair\` or search the affected root to reconcile`,
+    };
   }
 
   private methodsForSkill(skillId: string): ParsedMethodSummary[] {
@@ -554,8 +697,7 @@ function scoreSearchRow(row: SearchRow, reasons: SearchMatchReason[]): number {
   const fieldSignal = Math.min(0.5, reasons.length * 0.12);
   // bm25 returns negative scores where a larger magnitude is more relevant.
   const relevanceBoost = Math.min(0.15, Math.abs(row.rank ?? 0) / 100);
-  const riskPenalty = row.risk_level === "blocked" ? 0.35 : row.risk_level === "high" ? 0.2 : 0;
-  return Number(Math.min(1, Math.max(0, 0.4 + fieldSignal + relevanceBoost - riskPenalty)).toFixed(3));
+  return Number(Math.min(1, Math.max(0, 0.4 + fieldSignal + relevanceBoost)).toFixed(3));
 }
 
 function duplicateScore(skill: ParsedSkill, candidate: SkillSearchCandidate): number {
@@ -576,13 +718,6 @@ function duplicateScore(skill: ParsedSkill, candidate: SkillSearchCandidate): nu
       : 0;
 
   return Number(Math.max(nameDescriptionScore, methodScore).toFixed(3));
-}
-
-function riskLevel(value: string | null): SkillSearchCandidate["riskLevel"] {
-  if (value === "medium" || value === "high" || value === "blocked") {
-    return value;
-  }
-  return "low";
 }
 
 function readJsonArray(value: string): string[] {

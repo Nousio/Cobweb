@@ -1,6 +1,5 @@
 import fg from "fast-glob";
 import { dirname, resolve } from "node:path";
-import { auditParsedSkill } from "../audit/audit.js";
 import { parseSkillDirectory } from "../parser/skill-parser.js";
 import type { ScanResult, SkillCandidate } from "../types.js";
 
@@ -9,9 +8,8 @@ export interface ScanOptions {
   includeHidden?: boolean;
 }
 
-export async function scanSkills(path: string, options: ScanOptions = {}): Promise<ScanResult> {
+export async function findSkillDirectories(path: string, options: ScanOptions = {}): Promise<string[]> {
   const root = resolve(options.cwd ?? process.cwd(), path);
-  const warnings: string[] = [];
   const skillFiles = await fg("**/SKILL.md", {
     cwd: root,
     absolute: true,
@@ -20,20 +18,24 @@ export async function scanSkills(path: string, options: ScanOptions = {}): Promi
     ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
   });
 
+  return skillFiles.sort().map((skillFile) => dirname(skillFile));
+}
+
+export async function scanSkills(path: string, options: ScanOptions = {}): Promise<ScanResult> {
+  const warnings: string[] = [];
+  const skillRoots = await findSkillDirectories(path, options);
+
   const candidates: SkillCandidate[] = [];
 
-  for (const skillFile of skillFiles.sort()) {
-    const skillRoot = dirname(skillFile);
+  for (const skillRoot of skillRoots) {
     try {
       const parsed = await parseSkillDirectory(skillRoot);
-      const audit = auditParsedSkill(parsed);
 
       candidates.push({
         path: skillRoot,
         kind: "skill_dir",
         name: parsed.name,
         description: parsed.description,
-        riskLevel: audit.riskLevel,
         duplicateOf: null,
         warnings: parsed.warnings,
       });

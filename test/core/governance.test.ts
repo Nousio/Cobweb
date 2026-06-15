@@ -45,7 +45,6 @@ describe("core governance helpers", () => {
         canonicalPath: source,
         sourceType: "imported",
         contentHash: (await import("../../packages/core/src/parser/skill-parser.js")).parseSkillMarkdown(source, await readFile(join(source, "SKILL.md"), "utf8")).contentHash,
-        riskLevel: "low",
       },
       { providerName: "agents", projectRoot: root, strategy: "copy" },
     );
@@ -70,7 +69,6 @@ describe("core governance helpers", () => {
         canonicalPath: source,
         sourceType: "imported",
         contentHash: parsed.contentHash,
-        riskLevel: "low",
       },
       { providerName: "agents", projectRoot: root, strategy: "link" },
     );

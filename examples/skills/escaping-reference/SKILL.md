@@ -1,6 +1,6 @@
 ---
 name: escaping-reference
-description: Demonstrates an out-of-root reference that audit should flag.
+description: Demonstrates a markdown reference to a neighboring workspace file.
 ---
 
 # Escaping Reference
