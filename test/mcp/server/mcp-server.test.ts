@@ -16,6 +16,7 @@ afterEach(() => {
 describe("MCP server tool dispatch", () => {
   it("lists phase-one and validation tools", () => {
     expect(mcpTools.map((tool) => tool.name)).toContain("skill_validate");
+    expect(mcpTools.map((tool) => tool.name)).toContain("skill_graph");
   });
 
   it("dispatches status without arguments", async () => {
@@ -34,6 +35,12 @@ describe("MCP server tool dispatch", () => {
     callDaemon.mockResolvedValue({ candidates: [] });
     await dispatchMcpTool("skill_search", { path: "/skills", query: "review", limit: 3 });
     expect(callDaemon).toHaveBeenCalledWith("skill_search", { path: "/skills", query: "review", limit: 3 });
+  });
+
+  it("dispatches skill_graph with graph options", async () => {
+    callDaemon.mockResolvedValue({ nodes: [], edges: [] });
+    await dispatchMcpTool("skill_graph", { path: "/skills", maxDepth: 4, includeExternal: false });
+    expect(callDaemon).toHaveBeenCalledWith("skill_graph", { path: "/skills", maxDepth: 4, includeExternal: false });
   });
 
   it("returns actionable guidance when the daemon is unavailable", async () => {

@@ -9,7 +9,7 @@ export async function createMergePlan(sourcePath: string, targetPath: string): P
   const actions = [
     `Keep canonical target: ${target.name}`,
     `Review source sections before manual merge: ${source.sections.map((section) => section.title).join(", ") || "none"}`,
-    `Re-run lint and audit after merging content into ${targetPath}`,
+    `Re-run lint after merging content into ${targetPath}`,
   ];
 
   return {

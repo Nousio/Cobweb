@@ -2,7 +2,7 @@ import type { SkillSearchResult } from "@cobweb/core";
 import {
   applyProjectionPlan,
   applyVendorPlan,
-  auditParsedSkill,
+  buildSkillGraph,
   builtinProviders,
   canonicalSkillFromRecord,
   checkPolicyAlignment,
@@ -16,11 +16,20 @@ import {
   toErrorMessage,
   updateSkillPolicy,
 } from "@cobweb/core";
-import { watch } from "node:fs";
 import { access, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { AppState } from "../app-state/app-state.js";
+import {
+  ensureIndexedRoot,
+  indexStatusSnapshot,
+  initializeIndexCoordinator,
+  markRootDegraded,
+  markRootFresh,
+  overallFreshness,
+  rememberWatchRoot,
+  rootFreshness,
+} from "../indexing/index-coordinator.js";
 import type { JsonRpcRequest, JsonRpcResponse } from "./protocol.js";
 
 export interface DaemonServer {
@@ -75,6 +84,7 @@ export async function startIpcServer(state: AppState): Promise<DaemonServer> {
     });
   });
   await chmod(state.paths.socketPath, 0o600);
+  await initializeIndexCoordinator(state);
   idleTimer = startIdleTimer(state, server, () => {
     stopping = true;
   });
@@ -101,12 +111,11 @@ async function stopServer(state: AppState, server: net.Server, markStopping: () 
   markStopping();
   await state.writer.waitForIdle();
   for (const timer of state.indexTimers.values()) {
-    clearTimeout(timer);
+    clearTimeout(timer.timer);
   }
   state.indexTimers.clear();
-  for (const watcher of state.watchers.splice(0)) {
-    watcher.close();
-  }
+  await Promise.all(Array.from(state.watchers.values()).map((watcher) => watcher.close()));
+  state.watchers.clear();
   // Truncate the WAL before closing so a crash cannot strand uncheckpointed pages;
   // never block socket cleanup on a checkpoint failure.
   try {
@@ -175,18 +184,15 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
         socketPath: state.paths.socketPath,
         dbPath: state.paths.dbPath,
         db: state.db.skillStatus(),
-        freshness: state.freshness,
+        freshness: overallFreshness(state),
         writer: state.writer.snapshot(),
         lastError: state.lastError,
+        index: indexStatusSnapshot(state),
       };
     case "scan": {
       const params = expectParams<{ path: string }>(request.params);
-      rememberWatchRoot(state, resolve(params.path));
+      rememberWatchRoot(state, resolve(params.path), { persist: false, reason: "scan_registered_root" });
       return scanSkills(params.path);
-    }
-    case "audit": {
-      const params = expectParams<{ path: string }>(request.params);
-      return auditParsedSkill(await parseSkillDirectory(params.path));
     }
     case "importSkill": {
       const params = expectParams<{ path: string; canonicalDir?: string }>(request.params);
@@ -199,10 +205,10 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
           })).canonicalPath
           : sourcePath;
         const parsed = await parseSkillDirectory(importPath);
-        const audit = auditParsedSkill(parsed);
         const duplicates = state.db.findDuplicateCandidates(parsed);
-        state.freshness = "fresh";
-        return { ...state.db.upsertSkill(parsed, audit), duplicates };
+        const record = state.db.upsertSkill(parsed);
+        markRootFresh(state, importPath, "imported_skill");
+        return { ...record, duplicates };
       });
     }
     case "checkpointWal":
@@ -217,7 +223,10 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
         // rebuildFromLockfile prunes every skill outside the lockfile, so any ad-hoc root
         // indexed in this session must be re-indexed on its next search.
         state.indexedRoots.clear();
-        state.freshness = "fresh";
+        for (const root of state.watchRoots) {
+          markRootDegraded(state, root, "lockfile_rebuild_requires_reconcile");
+        }
+        state.freshness = overallFreshness(state);
         return result;
       });
     }
@@ -247,10 +256,7 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
       return state.writer.enqueue("SyncProjection", async () => {
         const results = [];
         const skills = await Promise.all(
-          Array.from(new Set(plans.map((plan) => plan.sourcePath))).map(async (sourcePath) => {
-            const skill = await parseSkillDirectory(sourcePath);
-            return { skill, audit: auditParsedSkill(skill) };
-          }),
+          Array.from(new Set(plans.map((plan) => plan.sourcePath))).map((sourcePath) => parseSkillDirectory(sourcePath)),
         );
         state.db.bulkUpsertSkills(skills);
 
@@ -259,7 +265,9 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
           state.db.recordProjectionInstall(plan.sourcePath, result);
           results.push(result);
         }
-        state.freshness = "fresh";
+        for (const skill of skills) {
+          markRootFresh(state, skill.rootPath, "sync_upserted_skill");
+        }
         return { plans, results };
       });
     }
@@ -282,7 +290,7 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
           implicitInvocation: params.implicitInvocation,
           selfContained: params.selfContained,
         });
-        state.freshness = "degraded";
+        markRootDegraded(state, resolve(params.path), "policy_updated");
         return { ok: true };
       });
     }
@@ -301,10 +309,19 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
       const candidates = state.db.searchSkills(params.query, { limit: params.limit, root });
       return {
         query: params.query,
-        freshness: state.freshness,
+        freshness: rootFreshness(state, root),
         candidates,
         warnings,
       };
+    }
+    case "skill_graph": {
+      const params = expectParams<{ path: string; maxDepth?: number; includeExternal?: boolean }>(request.params);
+      const root = resolve(params.path);
+      rememberWatchRoot(state, root, { persist: false, reason: "skill_graph_registered_root" });
+      return buildSkillGraph(root, {
+        maxDepth: params.maxDepth,
+        includeExternal: params.includeExternal,
+      });
     }
     case "skill_select": {
       const params = expectParams<{ path: string; query: string; limit?: number }>(request.params);
@@ -314,8 +331,7 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
         params: { ...params, limit: params.limit ?? 5 },
       });
       const search = result as SkillSearchResult;
-      const selected = search.candidates.find((candidate) => !["high", "blocked"].includes(candidate.riskLevel)) ?? null;
-      const risks = selected ? auditParsedSkill(await parseSkillDirectory(selected.path)).findings : [];
+      const selected = search.candidates[0] ?? null;
       return {
         query: params.query,
         freshness: search.freshness,
@@ -326,9 +342,7 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
             confidence: selected.score,
           }
           : {
-            reason: search.candidates.length > 0
-              ? "No candidate was selected because every match is high or blocked risk."
-              : "No indexed skill matched the query.",
+            reason: "No indexed skill matched the query.",
             confidence: 0,
           },
         rejected: search.candidates
@@ -336,11 +350,8 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
           .map((candidate) => ({
             path: candidate.path,
             name: candidate.name,
-            reason: ["high", "blocked"].includes(candidate.riskLevel)
-              ? `Risk level is ${candidate.riskLevel}.`
-              : "Lower ranked match.",
+            reason: "Lower ranked match.",
           })),
-        risks,
       };
     }
     case "skill_context": {
@@ -356,7 +367,6 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
         methods: parsed.methodSummaries,
         resources: parsed.resources,
         policy: { ...parsed.policy, check: policy },
-        audit: auditParsedSkill(parsed),
         lint: await lintSkillDirectory(skillPath),
       };
     }
@@ -365,32 +375,25 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
       const skillPath = resolve(params.path);
       const parsed = await parseSkillDirectory(skillPath);
       await ensureIndexedRoot(state, dirname(skillPath));
-      const audit = auditParsedSkill(parsed);
       const lint = await lintSkillDirectory(skillPath);
       const policy = await checkPolicyAlignment(skillPath);
       return {
-        valid: lint.valid && audit.riskLevel !== "blocked" && policy.ok,
-        audit,
+        valid: lint.valid && policy.ok,
         lint,
         policy,
         duplicates: state.db.findDuplicateCandidates(parsed, { root: dirname(skillPath) }),
       };
     }
     case "doctor":
-      const integrity = state.db.integrityCheck();
+      const checks = [
+        { name: "ipc", ok: true, message: state.paths.socketPath },
+        { name: "writer_queue", ok: state.writer.snapshot().running === null },
+        { name: "db_path", ok: true, message: state.paths.dbPath },
+        ...state.db.schemaHealthChecks(),
+      ];
       return {
-        ok: integrity === "ok",
-        checks: [
-          { name: "ipc", ok: true, message: state.paths.socketPath },
-          { name: "writer_queue", ok: state.writer.snapshot().running === null },
-          { name: "db_path", ok: true, message: state.paths.dbPath },
-          {
-            name: "sqlite_integrity",
-            ok: integrity === "ok",
-            message:
-              integrity === "ok" ? integrity : `${integrity}; run \`cobweb daemon repair\` to rebuild from the lockfile`,
-          },
-        ],
+        ok: checks.every((check) => check.ok),
+        checks,
       };
     case "stop":
       return { stopping: true };
@@ -434,79 +437,6 @@ function startIdleTimer(state: AppState, server: net.Server, markStopping: () =>
   }, Math.min(Math.max(state.idleTimeoutMs, 1000), 60_000));
   timer.unref();
   return timer;
-}
-
-async function ensureIndexedRoot(state: AppState, root: string): Promise<string[]> {
-  rememberWatchRoot(state, root);
-  if (state.indexedRoots.has(root) && state.freshness === "fresh") {
-    return [];
-  }
-  return indexRoot(state, root);
-}
-
-async function indexRoot(state: AppState, root: string): Promise<string[]> {
-  const pending = state.indexTimers.get(root);
-  if (pending) {
-    clearTimeout(pending);
-    state.indexTimers.delete(root);
-  }
-
-  try {
-    return await state.writer.enqueue("IndexSkillRoot", async () => {
-      state.freshness = "rebuilding";
-      const scan = await scanSkills(root);
-      const records = await Promise.all(
-        scan.candidates.map(async (candidate) => {
-          const skill = await parseSkillDirectory(candidate.path);
-          return { skill, audit: auditParsedSkill(skill) };
-        }),
-      );
-      const imported = state.db.bulkUpsertSkills(records);
-      state.db.pruneSkillsUnderRoot(root, imported.map((record) => record.id));
-      state.indexedRoots.add(root);
-      state.freshness = "fresh";
-      return scan.warnings;
-    });
-  } catch (error) {
-    state.freshness = "degraded";
-    state.lastError = toErrorMessage(error);
-    throw error;
-  }
-}
-
-function scheduleIndexRoot(state: AppState, root: string): void {
-  const existing = state.indexTimers.get(root);
-  if (existing) {
-    clearTimeout(existing);
-  }
-
-  const timer = setTimeout(() => {
-    state.indexTimers.delete(root);
-    void indexRoot(state, root).catch(() => {
-      // indexRoot records freshness and lastError for status.
-    });
-  }, 250);
-  timer.unref();
-  state.indexTimers.set(root, timer);
-}
-
-function rememberWatchRoot(state: AppState, root: string): void {
-  if (state.watchRoots.has(root)) {
-    return;
-  }
-  try {
-    // Node >= 20.13 supports recursive fs.watch on Linux, macOS, and Windows; recursive
-    // coverage is required so edits to nested SKILL.md files invalidate the index.
-    const watcher = watch(root, { recursive: true }, () => {
-      state.freshness = "degraded";
-      scheduleIndexRoot(state, root);
-    });
-    watcher.unref();
-    state.watchers.push(watcher);
-    state.watchRoots.add(root);
-  } catch {
-    state.freshness = "degraded";
-  }
 }
 
 async function readDaemonLock(path: string): Promise<{ pid: number } | null> {

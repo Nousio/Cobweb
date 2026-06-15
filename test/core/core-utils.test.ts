@@ -77,7 +77,6 @@ describe("builtinProviders", () => {
         canonicalPath: "/canon/review",
         sourceType: "imported",
         contentHash: "hash",
-        riskLevel: "low",
       },
       { providerName: "cursor", projectRoot: "/proj", strategy: "link" },
     );
@@ -98,7 +97,6 @@ describe("builtinProviders", () => {
         rootPath: "/src/deploy",
         sourceType: "project",
         contentHash: "h2",
-        riskLevel: "low",
       },
       { providerName: "claude", projectRoot: "/proj", strategy: "copy" },
     );

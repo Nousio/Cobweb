@@ -1,5 +1,5 @@
 import { importCanonicalSkill } from "@cobweb/core";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -22,6 +22,27 @@ function sendRaw(socketPath: string, payload: string): Promise<string> {
     });
     socket.once("error", reject);
   });
+}
+
+async function waitForRootStatus(
+  socketPath: string,
+  rootPath: string,
+  predicate: (root: Awaited<ReturnType<typeof callDaemon<"status">>>["index"]["roots"][number]) => boolean,
+): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const status = await callDaemon("status", undefined, socketPath);
+    const root = status.index.roots.find((entry) => entry.root === rootPath);
+    if (root && predicate(root)) {
+      return;
+    }
+    await delay(25);
+  }
+  throw new Error(`Timed out waiting for root status: ${rootPath}`);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 let dir: string;
@@ -67,9 +88,18 @@ describe("daemon IPC", () => {
     expect(result.candidates[0]?.name).toBe("review");
   });
 
-  it("audits through the daemon", async () => {
-    const result = await callDaemon("audit", { path: skillRoot }, socketPath);
-    expect(result.riskLevel).toBe("low");
+  it("builds a SkillGraph through the daemon", async () => {
+    const graphRoot = await mkdtemp(join(tmpdir(), "cobweb-daemon-graph-"));
+    const graphSkill = join(graphRoot, "workflow");
+    await mkdir(graphSkill, { recursive: true });
+    await writeFile(join(graphSkill, "SKILL.md"), "---\nname: workflow\ndescription: Workflow\n---\n\n# Workflow\n\nUse [missing](../missing.md).\n");
+
+    const result = await callDaemon("skill_graph", { path: graphRoot, includeExternal: false }, socketPath);
+
+    expect(result.nodes.some((node) => node.kind === "scan_root")).toBe(true);
+    expect(result.nodes.some((node) => node.kind === "skill" && node.name === "workflow")).toBe(true);
+    expect(result.edges.some((edge) => edge.kind === "references" && edge.unresolved)).toBe(true);
+    expect(result.warnings.some((warning) => warning.includes("referenced path does not exist"))).toBe(true);
   });
 
   it("imports a skill via the Writer Queue and reflects it in status", async () => {
@@ -93,7 +123,6 @@ describe("daemon IPC", () => {
   it("runs skill validation through the daemon", async () => {
     const validation = await callDaemon("skill_validate", { path: skillRoot }, socketPath);
     expect(validation.valid).toBe(true);
-    expect(validation.audit.riskLevel).toBe("low");
     expect(validation.lint.valid).toBe(true);
     expect(validation.duplicates).toHaveLength(0);
   });
@@ -103,6 +132,336 @@ describe("daemon IPC", () => {
     expect(result.freshness).toBe("fresh");
     expect(result.candidates[0]?.name).toBe("review");
     expect(result.candidates[0]?.matchReasons.length).toBeGreaterThan(0);
+  });
+
+  it("uses content hashes to skip unchanged roots on later searches", async () => {
+    const hashDir = await mkdtemp(join(tmpdir(), "cobweb-hash-reconcile-"));
+    const hashSkill = join(hashDir, "review");
+    await mkdir(hashSkill, { recursive: true });
+    await writeFile(join(hashSkill, "SKILL.md"), "---\nname: hash-review\ndescription: Hash review\n---\n\n# Body\n\nStable body.\n");
+
+    const hashSocket = join(hashDir, "cobwebd.sock");
+    const hashServer = await startIpcServer(
+      createAppState({
+        dataDir: hashDir,
+        dbPath: join(hashDir, "cobweb.db"),
+        socketPath: hashSocket,
+        lockPath: join(hashDir, "lock.yaml"),
+      }),
+    );
+
+    try {
+      await callDaemon("skill_search", { path: hashDir, query: "stable" }, hashSocket);
+      await waitForRootStatus(hashSocket, hashDir, (root) => root.watcherState === "ready");
+      await callDaemon("skill_search", { path: hashDir, query: "stable" }, hashSocket);
+
+      const status = await callDaemon("status", undefined, hashSocket);
+      const root = status.index.roots.find((entry) => entry.root === hashDir);
+      expect(root?.lastCheckKind).toBe("fast_path");
+      expect(root?.fastPathEligible).toBe(true);
+    } finally {
+      await hashServer.close();
+    }
+  });
+
+  it("uses signature checks after the staleness budget expires", async () => {
+    const staleDir = await mkdtemp(join(tmpdir(), "cobweb-staleness-budget-"));
+    const staleSkill = join(staleDir, "review");
+    await mkdir(staleSkill, { recursive: true });
+    await writeFile(join(staleSkill, "SKILL.md"), "---\nname: stale-review\ndescription: Stale review\n---\n\n# Body\n\nStable body.\n");
+
+    const staleSocket = join(staleDir, "cobwebd.sock");
+    const state = createAppState({
+      dataDir: staleDir,
+      dbPath: join(staleDir, "cobweb.db"),
+      socketPath: staleSocket,
+      lockPath: join(staleDir, "lock.yaml"),
+    });
+    state.maxStalenessMs = 1;
+    const staleServer = await startIpcServer(state);
+
+    try {
+      await callDaemon("skill_search", { path: staleDir, query: "stable" }, staleSocket);
+      await waitForRootStatus(staleSocket, staleDir, (root) => root.watcherState === "ready");
+      await delay(5);
+      await callDaemon("skill_search", { path: staleDir, query: "stable" }, staleSocket);
+
+      const status = await callDaemon("status", undefined, staleSocket);
+      const root = status.index.roots.find((entry) => entry.root === staleDir);
+      expect(root?.lastCheckKind).toBe("signature_check");
+      expect(root?.stalenessBudgetMs).toBe(1);
+    } finally {
+      await staleServer.close();
+    }
+  });
+
+  it("does not extend the staleness budget on repeated fast-path checks", async () => {
+    const missedDir = await mkdtemp(join(tmpdir(), "cobweb-missed-watch-budget-"));
+    const missedSkill = join(missedDir, "changing");
+    const missedSkillFile = join(missedSkill, "SKILL.md");
+    await mkdir(missedSkill, { recursive: true });
+    await writeFile(missedSkillFile, "---\nname: missed-watch\ndescription: Missed watch\n---\n\n# Body\n\nOld body.\n");
+
+    const missedSocket = join(missedDir, "cobwebd.sock");
+    const state = createAppState({
+      dataDir: missedDir,
+      dbPath: join(missedDir, "cobweb.db"),
+      socketPath: missedSocket,
+      lockPath: join(missedDir, "lock.yaml"),
+    });
+    state.maxStalenessMs = 40;
+    const missedServer = await startIpcServer(state);
+
+    try {
+      await callDaemon("skill_search", { path: missedDir, query: "old" }, missedSocket);
+      await waitForRootStatus(missedSocket, missedDir, (root) => root.watcherState === "ready");
+      await state.watchers.get(missedDir)?.close();
+      state.watchers.delete(missedDir);
+      const rootState = state.indexRoots.get(missedDir);
+      expect(rootState).toBeDefined();
+      rootState!.lastVerifiedAt = new Date(Date.now() - 35).toISOString();
+
+      await writeFile(missedSkillFile, "---\nname: missed-watch\ndescription: Missed watch\n---\n\n# Body\n\nUpdated needle.\n");
+
+      let found = false;
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const result = await callDaemon("skill_search", { path: missedDir, query: "updated" }, missedSocket);
+        found = result.candidates[0]?.name === "missed-watch";
+        if (found) {
+          break;
+        }
+        await delay(5);
+      }
+
+      expect(found).toBe(true);
+      const status = await callDaemon("status", undefined, missedSocket);
+      const root = status.index.roots.find((entry) => entry.root === missedDir);
+      expect(root?.lastCheckKind).toBe("full_reconcile");
+    } finally {
+      await missedServer.close();
+    }
+  });
+
+  it("reflects SKILL.md changes through the watcher within the staleness budget", async () => {
+    const watchDir = await mkdtemp(join(tmpdir(), "cobweb-watch-update-"));
+    const watchSkill = join(watchDir, "changing");
+    const watchSkillFile = join(watchSkill, "SKILL.md");
+    await mkdir(watchSkill, { recursive: true });
+    await writeFile(watchSkillFile, "---\nname: watch-update\ndescription: Watch update\n---\n\n# Body\n\nOld body.\n");
+
+    const watchSocket = join(watchDir, "cobwebd.sock");
+    const watchServer = await startIpcServer(
+      createAppState({
+        dataDir: watchDir,
+        dbPath: join(watchDir, "cobweb.db"),
+        socketPath: watchSocket,
+        lockPath: join(watchDir, "lock.yaml"),
+      }),
+    );
+
+    try {
+      await callDaemon("skill_search", { path: watchDir, query: "old" }, watchSocket);
+      await waitForRootStatus(watchSocket, watchDir, (root) => root.watcherState === "ready");
+      await writeFile(watchSkillFile, "---\nname: watch-update\ndescription: Watch update\n---\n\n# Body\n\nUpdated needle.\n");
+
+      const deadline = Date.now() + 2_000;
+      let found = false;
+      while (Date.now() < deadline) {
+        const result = await callDaemon("skill_search", { path: watchDir, query: "updated" }, watchSocket);
+        found = result.candidates[0]?.name === "watch-update";
+        if (found) {
+          break;
+        }
+        await delay(50);
+      }
+      expect(found).toBe(true);
+    } finally {
+      await watchServer.close();
+    }
+  });
+
+  it("falls back to full reconcile when a watcher is unavailable", async () => {
+    const unavailableDir = await mkdtemp(join(tmpdir(), "cobweb-watch-unavailable-"));
+    const unavailableSkill = join(unavailableDir, "changing");
+    const unavailableSkillFile = join(unavailableSkill, "SKILL.md");
+    await mkdir(unavailableSkill, { recursive: true });
+    await writeFile(
+      unavailableSkillFile,
+      "---\nname: unavailable-watch\ndescription: Watch unavailable\n---\n\n# Body\n\nOld body.\n",
+    );
+
+    const unavailableSocket = join(unavailableDir, "cobwebd.sock");
+    const state = createAppState({
+      dataDir: unavailableDir,
+      dbPath: join(unavailableDir, "cobweb.db"),
+      socketPath: unavailableSocket,
+      lockPath: join(unavailableDir, "lock.yaml"),
+    });
+    const unavailableServer = await startIpcServer(state);
+
+    try {
+      await callDaemon("skill_search", { path: unavailableDir, query: "old" }, unavailableSocket);
+      const root = state.indexRoots.get(unavailableDir);
+      expect(root).toBeDefined();
+      Object.assign(root!, {
+        state: "degraded",
+        reason: "watch_unavailable",
+        watcherState: "unavailable",
+        watching: false,
+        dirty: false,
+      });
+      await state.watchers.get(unavailableDir)?.close();
+      state.watchers.delete(unavailableDir);
+
+      await writeFile(
+        unavailableSkillFile,
+        "---\nname: unavailable-watch\ndescription: Watch unavailable\n---\n\n# Body\n\nUpdated needle.\n",
+      );
+      const result = await callDaemon("skill_search", { path: unavailableDir, query: "updated" }, unavailableSocket);
+      expect(result.candidates[0]?.name).toBe("unavailable-watch");
+
+      const status = await callDaemon("status", undefined, unavailableSocket);
+      const updatedRoot = status.index.roots.find((entry) => entry.root === unavailableDir);
+      expect(updatedRoot?.watcherState).toBe("unavailable");
+      expect(updatedRoot?.fastPathEligible).toBe(false);
+    } finally {
+      await unavailableServer.close();
+    }
+  });
+
+  it("coalesces concurrent searches for the same cold root", async () => {
+    const coalesceDir = await mkdtemp(join(tmpdir(), "cobweb-coalesce-"));
+    const coalesceSkill = join(coalesceDir, "review");
+    await mkdir(coalesceSkill, { recursive: true });
+    await writeFile(join(coalesceSkill, "SKILL.md"), "---\nname: coalesce-review\ndescription: Coalesce review\n---\n\n# Body\n\nConcurrent needle.\n");
+
+    const coalesceSocket = join(coalesceDir, "cobwebd.sock");
+    const state = createAppState({
+      dataDir: coalesceDir,
+      dbPath: join(coalesceDir, "cobweb.db"),
+      socketPath: coalesceSocket,
+      lockPath: join(coalesceDir, "lock.yaml"),
+    });
+    let reconciles = 0;
+    const originalListHashes = state.db.listSkillContentHashesUnderRoot.bind(state.db);
+    state.db.listSkillContentHashesUnderRoot = (rootPath: string) => {
+      reconciles += 1;
+      return originalListHashes(rootPath);
+    };
+    const coalesceServer = await startIpcServer(state);
+
+    try {
+      const [left, right] = await Promise.all([
+        callDaemon("skill_search", { path: coalesceDir, query: "concurrent" }, coalesceSocket),
+        callDaemon("skill_search", { path: coalesceDir, query: "concurrent" }, coalesceSocket),
+      ]);
+      expect(left.candidates[0]?.name).toBe("coalesce-review");
+      expect(right.candidates[0]?.name).toBe("coalesce-review");
+      expect(reconciles).toBe(1);
+    } finally {
+      await coalesceServer.close();
+    }
+  });
+
+  it("isolates a bad SKILL.md while indexing the rest of the root", async () => {
+    const partialDir = await mkdtemp(join(tmpdir(), "cobweb-partial-index-"));
+    const goodSkill = join(partialDir, "good");
+    const badSkill = join(partialDir, "bad");
+    await mkdir(goodSkill, { recursive: true });
+    await mkdir(badSkill, { recursive: true });
+    await writeFile(join(goodSkill, "SKILL.md"), "---\nname: good\ndescription: Good skill\n---\n\n# Body\n\nNeedle content.\n");
+    await writeFile(join(badSkill, "SKILL.md"), "---\nname: [\n---\n\n# Broken\n");
+
+    const partialSocket = join(partialDir, "cobwebd.sock");
+    const partialServer = await startIpcServer(
+      createAppState({
+        dataDir: partialDir,
+        dbPath: join(partialDir, "cobweb.db"),
+        socketPath: partialSocket,
+        lockPath: join(partialDir, "lock.yaml"),
+      }),
+    );
+
+    try {
+      const result = await callDaemon("skill_search", { path: partialDir, query: "needle" }, partialSocket);
+      expect(result.candidates[0]?.name).toBe("good");
+      expect(result.warnings.some((warning) => warning.includes(badSkill))).toBe(true);
+
+      const status = await callDaemon("status", undefined, partialSocket);
+      const root = status.index.roots.find((entry) => entry.root === partialDir);
+      expect(root?.state).toBe("degraded");
+      expect(root?.lastIndexError).toContain(badSkill);
+    } finally {
+      await partialServer.close();
+    }
+  });
+
+  it("returns freshness for the requested root instead of the global index summary", async () => {
+    const multiRootDir = await mkdtemp(join(tmpdir(), "cobweb-root-freshness-"));
+    const freshRoot = join(multiRootDir, "fresh-root");
+    const freshSkill = join(freshRoot, "good");
+    const degradedRoot = join(multiRootDir, "degraded-root");
+    const degradedSkill = join(degradedRoot, "bad");
+    const degradedSkillFile = join(degradedSkill, "SKILL.md");
+    await mkdir(freshSkill, { recursive: true });
+    await mkdir(degradedSkill, { recursive: true });
+    await writeFile(join(freshSkill, "SKILL.md"), "---\nname: local-fresh\ndescription: Fresh root\n---\n\n# Body\n\nFresh needle.\n");
+    await writeFile(degradedSkillFile, "---\nname: blocked-read\ndescription: Blocked read\n---\n\n# Body\n\nBroken needle.\n");
+    await chmod(degradedSkillFile, 0o000);
+
+    const multiSocket = join(multiRootDir, "cobwebd.sock");
+    const multiServer = await startIpcServer(
+      createAppState({
+        dataDir: multiRootDir,
+        dbPath: join(multiRootDir, "cobweb.db"),
+        socketPath: multiSocket,
+        lockPath: join(multiRootDir, "lock.yaml"),
+      }),
+    );
+
+    try {
+      const degraded = await callDaemon("skill_search", { path: degradedRoot, query: "broken" }, multiSocket);
+      expect(degraded.freshness).toBe("degraded");
+
+      const fresh = await callDaemon("skill_search", { path: freshRoot, query: "needle" }, multiSocket);
+      expect(fresh.freshness).toBe("fresh");
+      expect(fresh.candidates[0]?.name).toBe("local-fresh");
+    } finally {
+      await chmod(degradedSkillFile, 0o600).catch(() => undefined);
+      await multiServer.close();
+    }
+  });
+
+  it("keeps previously indexed skills when SKILL.md is temporarily unreadable", async () => {
+    const unreadableDir = await mkdtemp(join(tmpdir(), "cobweb-unreadable-index-"));
+    const unreadableSkill = join(unreadableDir, "kept");
+    const skillFile = join(unreadableSkill, "SKILL.md");
+    await mkdir(unreadableSkill, { recursive: true });
+    await writeFile(skillFile, "---\nname: kept\ndescription: Kept skill\n---\n\n# Body\n\nRetained needle.\n");
+
+    const unreadableSocket = join(unreadableDir, "cobwebd.sock");
+    const state = createAppState({
+      dataDir: unreadableDir,
+      dbPath: join(unreadableDir, "cobweb.db"),
+      socketPath: unreadableSocket,
+      lockPath: join(unreadableDir, "lock.yaml"),
+    });
+    const unreadableServer = await startIpcServer(state);
+
+    try {
+      const initial = await callDaemon("skill_search", { path: unreadableDir, query: "retained" }, unreadableSocket);
+      expect(initial.candidates[0]?.name).toBe("kept");
+
+      await chmod(skillFile, 0o000);
+      Object.assign(state.indexRoots.get(unreadableDir)!, { dirty: true, reason: "test_dirty_reconcile" });
+      const degraded = await callDaemon("skill_search", { path: unreadableDir, query: "retained" }, unreadableSocket);
+      expect(degraded.freshness).toBe("degraded");
+      expect(degraded.candidates[0]?.name).toBe("kept");
+      expect(degraded.warnings.some((warning) => warning.includes(unreadableSkill))).toBe(true);
+    } finally {
+      await chmod(skillFile, 0o600).catch(() => undefined);
+      await unreadableServer.close();
+    }
   });
 
   it("selects the best low-risk skill with a recommendation", async () => {
@@ -212,10 +571,92 @@ describe("daemon IPC", () => {
     }
   });
 
+  it("restores watch roots after daemon restart without marking them fresh", async () => {
+    const restoreDir = await mkdtemp(join(tmpdir(), "cobweb-restore-watch-"));
+    const restoreSkill = join(restoreDir, "watch");
+    await mkdir(restoreSkill, { recursive: true });
+    await writeFile(join(restoreSkill, "SKILL.md"), "---\nname: watch\ndescription: Watch skill\n---\n\n# Body\n\nWatch body.\n");
+    const restoreDb = join(restoreDir, "cobweb.db");
+    const restoreLock = join(restoreDir, "lock.yaml");
+    const firstSocket = join(restoreDir, "first.sock");
+    const firstServer = await startIpcServer(
+      createAppState({
+        dataDir: restoreDir,
+        dbPath: restoreDb,
+        socketPath: firstSocket,
+        lockPath: restoreLock,
+      }),
+    );
+
+    await callDaemon("skill_search", { path: restoreDir, query: "watch" }, firstSocket);
+    await firstServer.close();
+
+    const secondSocket = join(restoreDir, "second.sock");
+    const secondServer = await startIpcServer(
+      createAppState({
+        dataDir: restoreDir,
+        dbPath: restoreDb,
+        socketPath: secondSocket,
+        lockPath: restoreLock,
+      }),
+    );
+
+    try {
+      const status = await callDaemon("status", undefined, secondSocket);
+      const root = status.index.roots.find((entry) => entry.root === restoreDir);
+      expect(root?.state).toBe("degraded");
+      expect(root?.watching).toBe(true);
+      expect(root?.reason).toBe("restored_watch_root");
+    } finally {
+      await secondServer.close();
+    }
+  });
+
+  it("reconciles changes made while the daemon was stopped on the first query after restart", async () => {
+    const restartDir = await mkdtemp(join(tmpdir(), "cobweb-restart-reconcile-"));
+    const restartSkill = join(restartDir, "changing");
+    await mkdir(restartSkill, { recursive: true });
+    await writeFile(join(restartSkill, "SKILL.md"), "---\nname: changing\ndescription: Changing skill\n---\n\n# Body\n\nOld body.\n");
+    const restartDb = join(restartDir, "cobweb.db");
+    const restartLock = join(restartDir, "lock.yaml");
+    const firstSocket = join(restartDir, "first.sock");
+    const firstServer = await startIpcServer(
+      createAppState({
+        dataDir: restartDir,
+        dbPath: restartDb,
+        socketPath: firstSocket,
+        lockPath: restartLock,
+      }),
+    );
+
+    await callDaemon("skill_search", { path: restartDir, query: "old" }, firstSocket);
+    await firstServer.close();
+    await writeFile(join(restartSkill, "SKILL.md"), "---\nname: changing\ndescription: Changing skill\n---\n\n# Body\n\nUpdated needle.\n");
+
+    const secondSocket = join(restartDir, "second.sock");
+    const secondServer = await startIpcServer(
+      createAppState({
+        dataDir: restartDir,
+        dbPath: restartDb,
+        socketPath: secondSocket,
+        lockPath: restartLock,
+      }),
+    );
+
+    try {
+      const result = await callDaemon("skill_search", { path: restartDir, query: "updated" }, secondSocket);
+      expect(result.candidates[0]?.name).toBe("changing");
+      expect(result.candidates[0]?.matchReasons.some((reason) => reason.snippet?.toLowerCase().includes("updated"))).toBe(true);
+    } finally {
+      await secondServer.close();
+    }
+  });
+
   it("runs doctor with an ok integrity check", async () => {
     const result = await callDaemon("doctor", undefined, socketPath);
     expect(result.ok).toBe(true);
-    expect(result.checks.find((c) => c.name === "sqlite_integrity")?.ok).toBe(true);
+    expect(result.checks.find((c) => c.name === "sqlite_quick_check")?.ok).toBe(true);
+    expect(result.checks.find((c) => c.name === "fts_consistency")?.ok).toBe(true);
   });
 
   it("rejects unknown methods", async () => {

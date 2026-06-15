@@ -24,7 +24,8 @@
     "cobwebd": "./dist/index.js"
   },
   "dependencies": {
-    "@cobweb/core": "0.2.0"
+    "@cobweb/core": "0.2.0",
+    "chokidar": "^5.0.0"
   },
   "scripts": {
     "build": "tsc -b",

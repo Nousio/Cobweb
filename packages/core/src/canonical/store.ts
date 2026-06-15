@@ -52,7 +52,6 @@ export function canonicalSkillFromRecord(record: CanonicalSkillRecord): Canonica
     canonicalPath: record.canonicalPath,
     sourceType: "imported",
     contentHash: record.contentHash,
-    riskLevel: "low",
     provenance: record.provenance,
   };
 }

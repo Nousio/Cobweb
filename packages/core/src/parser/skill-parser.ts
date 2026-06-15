@@ -1,6 +1,7 @@
+import fg from "fast-glob";
 import matter from "gray-matter";
 import { readFile } from "node:fs/promises";
-import { isAbsolute, normalize, relative, resolve } from "node:path";
+import { isAbsolute, normalize, relative, resolve, sep } from "node:path";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { sha256 } from "../hash.js";
@@ -18,7 +19,11 @@ interface MarkdownNode {
 export async function parseSkillDirectory(rootPath: string): Promise<ParsedSkill> {
   const skillPath = resolve(rootPath, "SKILL.md");
   const content = await readFile(skillPath, "utf8");
-  return parseSkillMarkdown(rootPath, content);
+  const parsed = parseSkillMarkdown(rootPath, content);
+  return {
+    ...parsed,
+    resources: dedupeResources([...parsed.resources, ...(await standardDirectoryResources(rootPath))]),
+  };
 }
 
 export function parseSkillMarkdown(rootPath: string, content: string): ParsedSkill {
@@ -29,16 +34,15 @@ export function parseSkillMarkdown(rootPath: string, content: string): ParsedSki
   const tree = unified().use(remarkParse).parse(markdown) as MarkdownNode;
 
   const name = readString(frontmatter.name);
-  const description = readString(frontmatter.description);
+  const frontmatterDescription = readString(frontmatter.description);
 
   if (!name) {
     warnings.push("missing frontmatter.name");
   }
-  if (!description) {
-    warnings.push("missing frontmatter.description");
-  }
+  warnings.push(...extensionFieldWarnings(frontmatter));
 
   const sections = extractSections(tree);
+  const description = frontmatterDescription || fallbackDescription(sections);
   const resources = extractResources(rootPath, tree, frontmatter);
   const methodSummaries = extractMethodSummaries(sections);
 
@@ -137,7 +141,7 @@ function extractMethodSummaries(sections: ParsedSection[]): ParsedMethodSummary[
 }
 
 function isActionableHeading(title: string): boolean {
-  return /\b(?:method|workflow|procedure|steps?|usage|run|invoke|command)\b|方法|流程|步骤|使用|执行/iu.test(title);
+  return /\b(?:method|instructions?|when to use|workflow|procedure|steps?|usage|examples?|inputs?|outputs?|tools?|run|invoke|command)\b|方法|说明|何时使用|流程|步骤|使用|示例|输入|输出|工具|执行/iu.test(title);
 }
 
 function summarizeSection(section: ParsedSection): string {
@@ -147,6 +151,11 @@ function summarizeSection(section: ParsedSection): string {
     .find(Boolean);
 
   return truncateAtSentence(content ?? section.title, 220);
+}
+
+function fallbackDescription(sections: ParsedSection[]): string {
+  const firstContentSection = sections.find((section) => section.content.trim());
+  return firstContentSection ? summarizeSection(firstContentSection) : "";
 }
 
 function methodName(title: string, index: number): string {
@@ -287,6 +296,49 @@ function dedupeResources(resources: ParsedResource[]): ParsedResource[] {
     seen.add(key);
     return true;
   });
+}
+
+async function standardDirectoryResources(rootPath: string): Promise<ParsedResource[]> {
+  const files = await fg(["scripts/**", "references/**", "assets/**"], {
+    cwd: rootPath,
+    absolute: false,
+    dot: true,
+    onlyFiles: true,
+  });
+
+  return files.sort().map((file) => resourceFromPath(rootPath, `.${sep}${file}`.replace(/\\/g, "/"), "standard-resource"));
+}
+
+function extensionFieldWarnings(frontmatter: Record<string, unknown>): string[] {
+  const warnings: string[] = [];
+  const booleanFields = ["disable-model-invocation", "user-invokable", "user-invocable"];
+  const arrayFields = ["allowed-tools", "paths", "context", "compatibility"];
+  const objectFields = ["metadata"];
+  const stringFields = ["license"];
+
+  for (const field of booleanFields) {
+    if (field in frontmatter && typeof frontmatter[field] !== "boolean") {
+      warnings.push(`frontmatter.${field} should be boolean when provided`);
+    }
+  }
+  for (const field of arrayFields) {
+    if (field in frontmatter && !Array.isArray(frontmatter[field])) {
+      warnings.push(`frontmatter.${field} should be an array when provided`);
+    }
+  }
+  for (const field of objectFields) {
+    const value = frontmatter[field];
+    if (field in frontmatter && (!value || typeof value !== "object" || Array.isArray(value))) {
+      warnings.push(`frontmatter.${field} should be an object when provided`);
+    }
+  }
+  for (const field of stringFields) {
+    if (field in frontmatter && typeof frontmatter[field] !== "string") {
+      warnings.push(`frontmatter.${field} should be string when provided`);
+    }
+  }
+
+  return warnings;
 }
 
 function extractPathLikeTokens(text: string): string[] {
