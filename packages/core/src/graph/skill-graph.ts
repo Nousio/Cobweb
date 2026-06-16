@@ -14,6 +14,7 @@ import type {
 
 export interface SkillGraphOptions {
   maxDepth?: number;
+  maxPaths?: number;
   includeExternal?: boolean;
 }
 
@@ -25,10 +26,12 @@ interface ParsedGraphSkill {
 }
 
 const DEFAULT_MAX_DEPTH = 32;
+const DEFAULT_MAX_PATHS = 1_000;
 
 export async function buildSkillGraph(scanRoot: string, options: SkillGraphOptions = {}): Promise<SkillGraphResult> {
   const root = resolve(scanRoot);
   const maxDepth = normalizeMaxDepth(options.maxDepth);
+  const maxPaths = normalizeMaxPaths(options.maxPaths);
   const includeExternal = options.includeExternal ?? true;
   const warnings: string[] = [];
   const nodes = new Map<string, SkillGraphNode>();
@@ -63,14 +66,15 @@ export async function buildSkillGraph(scanRoot: string, options: SkillGraphOptio
     await addResourceEdges(root, entry, parsedSkills, nodes, edges, warnings, includeExternal);
   }
 
-  const enumeration = enumeratePaths(rootId, nodes, edges, maxDepth, warnings);
+  markReferenceCycles(edges, nodes, warnings);
+  const enumeration = enumeratePaths(rootId, nodes, edges, maxDepth, maxPaths, warnings);
   const sortedNodes = Array.from(nodes.values()).sort(compareNodes);
 
   return {
     root,
     scanRootIsSkill: Boolean(scanRootSkill),
     nodes: sortedNodes,
-    edges: sortEdges(edges, nodes),
+    edges: finalizeEdges(edges, nodes),
     paths: enumeration.paths,
     warnings,
     truncated: enumeration.truncated,
@@ -173,12 +177,13 @@ async function addResourceEdges(
     }
 
     const id = `resource:${sha256(resolvedPath)}`;
+    const resourceRelativePath = relativePath(root, resolvedPath);
     nodes.set(id, {
       id,
       kind: "resource",
       path: resolvedPath,
-      relativePath: relativePath(root, resolvedPath),
-      depth: pathDepth(relativePath(root, resolvedPath)),
+      relativePath: resourceRelativePath,
+      depth: pathDepth(resourceRelativePath),
       name: resourceName(resolvedPath),
     });
     const edge: SkillGraphEdge = {
@@ -227,10 +232,11 @@ function enumeratePaths(
   nodes: Map<string, SkillGraphNode>,
   edges: SkillGraphEdge[],
   maxDepth: number,
+  maxPaths: number,
   warnings: string[],
 ): { paths: SkillGraphPath[]; truncated: boolean } {
   const byFrom = new Map<string, SkillGraphEdge[]>();
-  for (const edge of edges) {
+  for (const edge of edges.filter((candidate) => !candidate.invalidCycle)) {
     const list = byFrom.get(edge.from) ?? [];
     list.push(edge);
     byFrom.set(edge.from, list);
@@ -241,21 +247,36 @@ function enumeratePaths(
 
   const paths: SkillGraphPath[] = [];
   let truncated = false;
+  const pushPath = (path: SkillGraphPath): void => {
+    if (paths.length >= maxPaths) {
+      truncated = true;
+      return;
+    }
+    paths.push(path);
+  };
   const visit = (id: string, trail: string[], seen: Set<string>): void => {
+    if (paths.length >= maxPaths) {
+      truncated = true;
+      return;
+    }
     const next = byFrom.get(id) ?? [];
     if (trail.length - 1 >= maxDepth) {
       truncated ||= next.length > 0;
-      paths.push({ nodes: trail, leafKind: nodes.get(id)?.kind ?? "resource" });
+      pushPath({ nodes: trail, leafKind: nodes.get(id)?.kind ?? "resource" });
       return;
     }
     if (next.length === 0) {
-      paths.push({ nodes: trail, leafKind: nodes.get(id)?.kind ?? "resource" });
+      pushPath({ nodes: trail, leafKind: nodes.get(id)?.kind ?? "resource" });
       return;
     }
     for (const edge of next) {
+      if (paths.length >= maxPaths) {
+        truncated = true;
+        return;
+      }
       if (seen.has(edge.to)) {
         warnings.push(`cycle detected at ${nodes.get(edge.to)?.path ?? edge.to}`);
-        paths.push({ nodes: [...trail, edge.to], leafKind: nodes.get(edge.to)?.kind ?? "resource" });
+        pushPath({ nodes: [...trail, edge.to], leafKind: nodes.get(edge.to)?.kind ?? "resource" });
         continue;
       }
       visit(edge.to, [...trail, edge.to], new Set([...seen, edge.to]));
@@ -263,6 +284,47 @@ function enumeratePaths(
   };
   visit(rootId, [rootId], new Set([rootId]));
   return { paths, truncated };
+}
+
+function markReferenceCycles(edges: SkillGraphEdge[], nodes: Map<string, SkillGraphNode>, warnings: string[]): void {
+  const referenceEdges = edges.filter((edge) => edge.kind === "references_skill");
+  const byFrom = new Map<string, SkillGraphEdge[]>();
+  for (const edge of referenceEdges) {
+    const list = byFrom.get(edge.from) ?? [];
+    list.push(edge);
+    byFrom.set(edge.from, list);
+  }
+
+  const warningKeys = new Set<string>();
+  for (const edge of referenceEdges) {
+    if (!reaches(edge.to, edge.from, byFrom, new Set([edge.from]))) {
+      continue;
+    }
+    edge.invalidCycle = true;
+    const from = nodes.get(edge.from)?.relativePath ?? edge.from;
+    const to = nodes.get(edge.to)?.relativePath ?? edge.to;
+    const key = `${from}->${to}`;
+    if (!warningKeys.has(key)) {
+      warningKeys.add(key);
+      warnings.push(`invalid references_skill cycle: ${from} -> ${to}`);
+    }
+  }
+}
+
+function reaches(
+  current: string,
+  target: string,
+  byFrom: Map<string, SkillGraphEdge[]>,
+  seen: Set<string>,
+): boolean {
+  if (current === target) {
+    return true;
+  }
+  if (seen.has(current)) {
+    return false;
+  }
+  seen.add(current);
+  return (byFrom.get(current) ?? []).some((edge) => reaches(edge.to, target, byFrom, seen));
 }
 
 function skillNode(entry: ParsedGraphSkill): SkillGraphNode {
@@ -284,6 +346,13 @@ function normalizeMaxDepth(value: number | undefined): number {
   // Guard against NaN/Infinity from CLI parsing so depth truncation stays effective.
   if (value === undefined || !Number.isFinite(value)) {
     return DEFAULT_MAX_DEPTH;
+  }
+  return Math.max(1, Math.floor(value));
+}
+
+function normalizeMaxPaths(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return DEFAULT_MAX_PATHS;
   }
   return Math.max(1, Math.floor(value));
 }
@@ -332,12 +401,18 @@ function compareNodes(left: SkillGraphNode, right: SkillGraphNode): number {
   return left.kind.localeCompare(right.kind);
 }
 
-function sortEdges(edges: SkillGraphEdge[], nodes: Map<string, SkillGraphNode>): SkillGraphEdge[] {
-  return [...edges].sort((left, right) => {
-    const from = (nodes.get(left.from)?.relativePath ?? left.from).localeCompare(nodes.get(right.from)?.relativePath ?? right.from);
-    if (from !== 0) {
-      return from;
-    }
-    return (nodes.get(left.to)?.relativePath ?? left.to).localeCompare(nodes.get(right.to)?.relativePath ?? right.to);
-  });
+function finalizeEdges(edges: SkillGraphEdge[], nodes: Map<string, SkillGraphNode>): SkillGraphEdge[] {
+  return edges
+    .map((edge) => ({
+      ...edge,
+      fromRelativePath: nodes.get(edge.from)?.relativePath,
+      toRelativePath: nodes.get(edge.to)?.relativePath,
+    }))
+    .sort((left, right) => {
+      const from = (left.fromRelativePath ?? left.from).localeCompare(right.fromRelativePath ?? right.from);
+      if (from !== 0) {
+        return from;
+      }
+      return (left.toRelativePath ?? left.to).localeCompare(right.toRelativePath ?? right.to);
+    });
 }

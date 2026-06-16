@@ -127,7 +127,7 @@ export interface DaemonMethods {
     result: SkillSearchResult;
   };
   skill_graph: {
-    params: { path: string; maxDepth?: number; includeExternal?: boolean };
+    params: { path: string; maxDepth?: number; maxPaths?: number; includeExternal?: boolean; watch?: boolean };
     result: SkillGraphResult;
   };
   skill_select: {
