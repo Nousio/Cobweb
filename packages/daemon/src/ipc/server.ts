@@ -315,11 +315,16 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
       };
     }
     case "skill_graph": {
-      const params = expectParams<{ path: string; maxDepth?: number; includeExternal?: boolean }>(request.params);
+      const params = expectParams<{ path: string; maxDepth?: number; maxPaths?: number; includeExternal?: boolean; watch?: boolean }>(request.params);
       const root = resolve(params.path);
-      rememberWatchRoot(state, root, { persist: false, reason: "skill_graph_registered_root" });
+      // Graph is a read-only topology snapshot; only start a watcher when the caller
+      // explicitly wants to keep the root warm for later skill_search.
+      if (params.watch) {
+        rememberWatchRoot(state, root, { persist: false, reason: "skill_graph_registered_root" });
+      }
       return buildSkillGraph(root, {
         maxDepth: params.maxDepth,
+        maxPaths: params.maxPaths,
         includeExternal: params.includeExternal,
       });
     }

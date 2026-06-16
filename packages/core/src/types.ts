@@ -158,11 +158,16 @@ export interface SkillGraphNode {
 export interface SkillGraphEdge {
   from: string;
   to: string;
+  // Relative paths of the from/to nodes, denormalized so callers (humans and agents)
+  // can read an edge without joining back to the nodes array by id hash.
+  fromRelativePath?: string;
+  toRelativePath?: string;
   kind: SkillGraphEdgeKind;
   via?: ParsedResource["mentionedBy"];
   rawPath?: string;
   resolvedPath?: string;
   unresolved?: boolean;
+  invalidCycle?: boolean;
   external?: boolean;
 }
 

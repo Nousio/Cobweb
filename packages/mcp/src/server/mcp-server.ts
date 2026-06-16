@@ -23,13 +23,19 @@ export const mcpTools: Array<{ name: ToolName; description: string; inputSchema:
   },
   {
     name: "skill_graph",
-    description: "Build a SkillGraph topology from a scan root without audit or risk judgment.",
+    description:
+      "Build an in-memory, read-only SkillGraph topology from a scan root. Nodes: scan_root | skill | resource | external. Edges: contains (directory hierarchy) | references (resource/URL) | references_skill (points at another skill). Each edge carries fromRelativePath/toRelativePath plus rawPath/resolvedPath; missing targets are flagged unresolved, external URLs are flagged external, and direct/indirect skill reference cycles are flagged invalidCycle and excluded from path expansion. No audit/risk judgment, no persistence. By default it does not start a file watcher.",
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string" },
-        maxDepth: { type: "number" },
-        includeExternal: { type: "boolean" },
+        path: { type: "string", description: "Scan root directory to build the topology from." },
+        maxDepth: { type: "number", description: "Maximum root-to-leaf path enumeration depth (default 32)." },
+        maxPaths: { type: "number", description: "Maximum number of root-to-leaf paths to enumerate (default 1000)." },
+        includeExternal: { type: "boolean", description: "Include external URL nodes and edges (default true)." },
+        watch: {
+          type: "boolean",
+          description: "Register a daemon file watcher on the root to keep it warm for later skill_search (default false).",
+        },
       },
       required: ["path"],
     },

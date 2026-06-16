@@ -47,6 +47,8 @@ cobweb lint ./skills/my-skill
 cobweb dedup ./skills
 ```
 
+Use `cobweb graph ./skills --max-depth 16 --max-paths 500` when a large skill tree needs a smaller path enumeration budget.
+
 Import into the local store and sync to your tools. These write through the daemon, which starts automatically; pass `--write` to persist, or omit it for a dry-run preview:
 
 ```bash

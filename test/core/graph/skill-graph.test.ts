@@ -25,6 +25,11 @@ describe("buildSkillGraph", () => {
       "sibling",
     ]);
     expect(graph.edges.some((edge) => edge.kind === "contains")).toBe(true);
+    expect(
+      graph.edges.some(
+        (edge) => edge.kind === "contains" && edge.fromRelativePath === "parent" && edge.toRelativePath === "parent/child",
+      ),
+    ).toBe(true);
     expect(graph.edges.some((edge) => edge.kind === "references" && edge.rawPath === "../rules/rules.mdc")).toBe(true);
     expect(graph.edges.some((edge) => edge.kind === "references_skill" && edge.rawPath === "./child/SKILL.md")).toBe(true);
     expect(graph.edges.some((edge) => edge.kind === "references" && edge.rawPath === "https://example.com/guide")).toBe(true);
@@ -40,12 +45,29 @@ describe("buildSkillGraph", () => {
     expect(graph.edges.some((edge) => edge.external)).toBe(false);
   });
 
-  it("detects cycles while enumerating root-to-leaf paths", async () => {
+  it("marks direct skill reference cycles as invalid and skips them in paths", async () => {
     const root = await createGraphFixture();
     const graph = await buildSkillGraph(root);
 
-    expect(graph.warnings.some((warning) => warning.includes("cycle detected"))).toBe(true);
+    expect(graph.warnings.some((warning) => warning.includes("invalid references_skill cycle"))).toBe(true);
+    expect(graph.edges.some((edge) => edge.kind === "references_skill" && edge.invalidCycle)).toBe(true);
     expect(graph.paths.length).toBeGreaterThan(0);
+  });
+
+  it("marks indirect skill reference cycles as invalid", async () => {
+    const root = await createIndirectCycleFixture();
+    const graph = await buildSkillGraph(root);
+
+    expect(graph.edges.filter((edge) => edge.kind === "references_skill" && edge.invalidCycle)).toHaveLength(3);
+    expect(graph.warnings.filter((warning) => warning.includes("invalid references_skill cycle"))).toHaveLength(3);
+  });
+
+  it("truncates path enumeration at the max path count", async () => {
+    const root = await createWideFixture();
+    const graph = await buildSkillGraph(root, { maxPaths: 2 });
+
+    expect(graph.paths).toHaveLength(2);
+    expect(graph.truncated).toBe(true);
   });
 
   it("marks scanRoot as the root skill when SKILL.md is at the scan root", async () => {
@@ -90,5 +112,27 @@ async function createGraphFixture(): Promise<string> {
     "---\nname: child\ndescription: Child skill\n---\n\n# Child\n\nUse [parent](../SKILL.md).\n",
   );
   await writeFile(join(root, "sibling", "SKILL.md"), "---\nname: sibling\ndescription: Sibling skill\n---\n\n# Sibling\n\nBody.\n");
+  return root;
+}
+
+async function createIndirectCycleFixture(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "cobweb-skill-graph-indirect-cycle-"));
+  roots.push(root);
+  for (const name of ["a", "b", "c"]) {
+    await mkdir(join(root, name), { recursive: true });
+  }
+  await writeFile(join(root, "a", "SKILL.md"), "---\nname: a\ndescription: A\n---\n\n# A\n\nUse [b](../b/SKILL.md).\n");
+  await writeFile(join(root, "b", "SKILL.md"), "---\nname: b\ndescription: B\n---\n\n# B\n\nUse [c](../c/SKILL.md).\n");
+  await writeFile(join(root, "c", "SKILL.md"), "---\nname: c\ndescription: C\n---\n\n# C\n\nUse [a](../a/SKILL.md).\n");
+  return root;
+}
+
+async function createWideFixture(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "cobweb-skill-graph-wide-"));
+  roots.push(root);
+  for (const name of ["a", "b", "c"]) {
+    await mkdir(join(root, name), { recursive: true });
+    await writeFile(join(root, name, "SKILL.md"), `---\nname: ${name}\ndescription: ${name}\n---\n\n# ${name}\n\nBody.\n`);
+  }
   return root;
 }

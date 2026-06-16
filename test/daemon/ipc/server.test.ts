@@ -2,7 +2,7 @@ import { importCanonicalSkill } from "@cobweb/core";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createAppState } from "../../../packages/daemon/src/app-state/app-state.js";
 import { callDaemon } from "../../../packages/daemon/src/ipc/client.js";
@@ -99,7 +99,24 @@ describe("daemon IPC", () => {
     expect(result.nodes.some((node) => node.kind === "scan_root")).toBe(true);
     expect(result.nodes.some((node) => node.kind === "skill" && node.name === "workflow")).toBe(true);
     expect(result.edges.some((edge) => edge.kind === "references" && edge.unresolved)).toBe(true);
+    expect(result.edges.some((edge) => edge.kind === "contains" && edge.toRelativePath === "workflow")).toBe(true);
     expect(result.warnings.some((warning) => warning.includes("referenced path does not exist"))).toBe(true);
+
+    const status = await callDaemon("status", undefined, socketPath);
+    expect(status.index.roots.some((entry) => entry.root === resolve(graphRoot))).toBe(false);
+  });
+
+  it("registers a watcher for skill_graph only when watch is requested", async () => {
+    const watchRoot = await mkdtemp(join(tmpdir(), "cobweb-daemon-graph-watch-"));
+    const watchSkill = join(watchRoot, "workflow");
+    await mkdir(watchSkill, { recursive: true });
+    await writeFile(join(watchSkill, "SKILL.md"), "---\nname: workflow\ndescription: Workflow\n---\n\n# Workflow\n\nBody.\n");
+
+    await callDaemon("skill_graph", { path: watchRoot, watch: true }, socketPath);
+    await waitForRootStatus(socketPath, resolve(watchRoot), (root) => root.watching);
+
+    const status = await callDaemon("status", undefined, socketPath);
+    expect(status.index.roots.find((entry) => entry.root === resolve(watchRoot))?.watching).toBe(true);
   });
 
   it("imports a skill via the Writer Queue and reflects it in status", async () => {

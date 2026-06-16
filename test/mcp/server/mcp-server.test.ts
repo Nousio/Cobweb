@@ -39,8 +39,14 @@ describe("MCP server tool dispatch", () => {
 
   it("dispatches skill_graph with graph options", async () => {
     callDaemon.mockResolvedValue({ nodes: [], edges: [] });
-    await dispatchMcpTool("skill_graph", { path: "/skills", maxDepth: 4, includeExternal: false });
-    expect(callDaemon).toHaveBeenCalledWith("skill_graph", { path: "/skills", maxDepth: 4, includeExternal: false });
+    await dispatchMcpTool("skill_graph", { path: "/skills", maxDepth: 4, maxPaths: 10, includeExternal: false, watch: true });
+    expect(callDaemon).toHaveBeenCalledWith("skill_graph", {
+      path: "/skills",
+      maxDepth: 4,
+      maxPaths: 10,
+      includeExternal: false,
+      watch: true,
+    });
   });
 
   it("returns actionable guidance when the daemon is unavailable", async () => {

@@ -37,9 +37,10 @@ program
   .command("graph")
   .argument("[path]", "directory to graph", ".")
   .option("--max-depth <number>", "maximum graph traversal depth", Number.parseInt)
+  .option("--max-paths <number>", "maximum number of graph paths to enumerate", Number.parseInt)
   .option("--no-external", "omit external URL nodes")
-  .action(async (path: string, options: { maxDepth?: number; external?: boolean }) => {
-    printJson(await buildSkillGraph(path, { maxDepth: options.maxDepth, includeExternal: options.external }));
+  .action(async (path: string, options: { maxDepth?: number; maxPaths?: number; external?: boolean }) => {
+    printJson(await buildSkillGraph(path, { maxDepth: options.maxDepth, maxPaths: options.maxPaths, includeExternal: options.external }));
   });
 
 program
