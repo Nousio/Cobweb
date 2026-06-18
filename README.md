@@ -100,7 +100,7 @@ The MCP server exposes the same local governance model to agents:
 - `skill_graph` builds a topology graph of skill directories and document references from a scan root.
 - `skill_chain` returns one skill's root path, referenced skills, incoming references, and resources.
 - `skill_search` searches the daemon-managed FTS index and returns candidates with scores, score breakdowns, match reasons, and freshness.
-- `skill_select` chooses the best indexed candidate and returns its recommendation plus SkillGraph chain context. MCP callers must pass an analyzed `workItem.subject` alongside the routing query. When the work item is missing, input quality is low, or candidate confidence is low, the result also includes a `guidance` object (a reason, actionable checklist, and candidate `inspectionTargets`) so the calling agent can re-analyze the task, re-express the query, or inspect absolute skill paths before using an uncertain selection.
+- `skill_select` chooses the best indexed candidate and returns its recommendation plus SkillGraph chain context. MCP callers must pass an analyzed `workItem.subject` alongside the routing query. When the work item is missing, input quality is low, or candidate confidence is low, the result also includes a `guidance` object (a reason, actionable checklist, and `inspectionTargets`) so the calling agent can re-analyze the task, re-express the query, or inspect absolute skill/scan-root paths before using an uncertain selection.
 - `skill_context` returns method summaries, resources, policy, and lint context for one skill.
 - `skill_validate` combines lint, policy, and indexed duplicate checks before a skill is used or imported.
 

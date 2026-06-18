@@ -1,5 +1,9 @@
 import type { RoutingGuidance, RoutingGuidanceReason, RoutingWorkItem, SkillSearchCandidate } from "../types.js";
 
+export interface RoutingGuidanceOptions {
+  inspectionFallbackPaths?: string[];
+}
+
 // Initial thresholds, calibrated against rank.ts weight composition. They are
 // deliberately conservative so guidance only appears when routing is genuinely
 // weak, not on every terse query.
@@ -89,6 +93,7 @@ export function evaluateRoutingGuidance(
   query: string,
   candidates: SkillSearchCandidate[],
   workItem?: RoutingWorkItem,
+  options: RoutingGuidanceOptions = {},
 ): RoutingGuidance | null {
   const reason = detectGuidanceReason(query, candidates, workItem);
   if (!reason) {
@@ -98,14 +103,30 @@ export function evaluateRoutingGuidance(
     reason,
     expects: [...EXPECTED_DIMENSIONS],
     checklist: CHECKLIST_BY_REASON[reason],
-    inspectionTargets: candidates.slice(0, 5).map((candidate) => ({
-      path: candidate.path,
-      name: candidate.name,
-      score: candidate.score,
-      matchReasons: candidate.matchReasons,
-    })),
+    inspectionTargets: inspectionTargets(candidates, options),
     example: { ...GUIDANCE_EXAMPLE, constraints: [...GUIDANCE_EXAMPLE.constraints] },
   };
+}
+
+function inspectionTargets(candidates: SkillSearchCandidate[], options: RoutingGuidanceOptions) {
+  const candidateTargets = candidates.slice(0, 5).map((candidate) => ({
+    path: candidate.path,
+    name: candidate.name,
+    score: candidate.score,
+    matchReasons: candidate.matchReasons,
+    kind: "skill" as const,
+  }));
+  if (candidateTargets.length > 0) {
+    return candidateTargets;
+  }
+  return (options.inspectionFallbackPaths ?? []).map((path) => ({
+    path,
+    name: "scan root",
+    score: 0,
+    matchReasons: [],
+    kind: "scan_root" as const,
+    reason: "No indexed skill matched; inspect this scan root or call skill_graph to locate nearby skills.",
+  }));
 }
 
 function detectGuidanceReason(

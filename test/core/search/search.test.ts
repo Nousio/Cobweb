@@ -101,9 +101,21 @@ describe("evaluateRoutingGuidance", () => {
   });
 
   it("flags no_candidate when nothing matched", () => {
-    const guidance = evaluateRoutingGuidance("debug websocket reconnect", [], workItem);
+    const guidance = evaluateRoutingGuidance("debug websocket reconnect", [], workItem, {
+      inspectionFallbackPaths: ["/skills"],
+    });
     expect(guidance?.reason).toBe("no_candidate");
     expect(guidance?.checklist.length).toBeGreaterThan(0);
+    expect(guidance?.inspectionTargets).toEqual([
+      {
+        path: "/skills",
+        name: "scan root",
+        score: 0,
+        matchReasons: [],
+        kind: "scan_root",
+        reason: "No indexed skill matched; inspect this scan root or call skill_graph to locate nearby skills.",
+      },
+    ]);
   });
 
   it("flags query_too_long for a raw sentence that did not match confidently", () => {
@@ -145,6 +157,7 @@ describe("evaluateRoutingGuidance", () => {
         name: "weak",
         score: 0.2,
         matchReasons: [{ field: "body", signal: "fts_match", snippet: "[websocket] reconnect" }],
+        kind: "skill",
       },
     ]);
   });

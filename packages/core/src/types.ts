@@ -125,6 +125,8 @@ export interface RoutingInspectionTarget {
   name: string;
   score: number;
   matchReasons: SearchMatchReason[];
+  kind: "skill" | "scan_root";
+  reason?: string;
 }
 
 export interface RoutingGuidance {
