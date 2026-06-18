@@ -16,6 +16,11 @@ interface MarkdownNode {
   children?: MarkdownNode[];
 }
 
+export interface ParsedSkillGraphEntry {
+  name: string;
+  resources: ParsedResource[];
+}
+
 export async function parseSkillDirectory(rootPath: string): Promise<ParsedSkill> {
   const skillPath = resolve(rootPath, "SKILL.md");
   const content = await readFile(skillPath, "utf8");
@@ -23,6 +28,19 @@ export async function parseSkillDirectory(rootPath: string): Promise<ParsedSkill
   return {
     ...parsed,
     resources: dedupeResources([...parsed.resources, ...(await standardDirectoryResources(rootPath))]),
+  };
+}
+
+export async function parseSkillGraphEntry(rootPath: string): Promise<ParsedSkillGraphEntry> {
+  const skillPath = resolve(rootPath, "SKILL.md");
+  const content = await readFile(skillPath, "utf8");
+  const parsed = matter(content);
+  const frontmatter = parsed.data as Record<string, unknown>;
+  const tree = unified().use(remarkParse).parse(parsed.content) as MarkdownNode;
+  const name = readString(frontmatter.name) || fallbackName(rootPath);
+  return {
+    name,
+    resources: dedupeResources([...extractResources(rootPath, tree, frontmatter), ...(await standardDirectoryResources(rootPath))]),
   };
 }
 
@@ -141,7 +159,7 @@ function extractMethodSummaries(sections: ParsedSection[]): ParsedMethodSummary[
 }
 
 function isActionableHeading(title: string): boolean {
-  return /\b(?:method|instructions?|when to use|workflow|procedure|steps?|usage|examples?|inputs?|outputs?|tools?|run|invoke|command)\b|方法|说明|何时使用|流程|步骤|使用|示例|输入|输出|工具|执行/iu.test(title);
+  return /\b(?:method|instructions?|when to use|use when|trigger(?:s| scenarios?)?|scenarios?|guardrails?|workflow|decision workflow|review checklist|checklists?|procedure|steps?|usage|examples?|inputs?|outputs?|tools?|run|invoke|command)\b|方法|说明|何时使用|使用时机|触发场景|场景|护栏|流程|决策流程|检查清单|步骤|使用|示例|输入|输出|工具|执行/iu.test(title);
 }
 
 function summarizeSection(section: ParsedSection): string {
@@ -176,9 +194,11 @@ function triggerTerms(input: string): string[] {
     "with",
     "from",
     "into",
+    "not",
     "when",
     "then",
     "your",
+    "without",
     "skill",
     "method",
   ]);

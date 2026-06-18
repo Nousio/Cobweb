@@ -123,6 +123,32 @@ This section should not become a method when actionable headings exist.
     expect(parsed.methodSummaries[0]?.methodName).toBe("procedure");
   });
 
+  it("treats trigger scenarios and guardrails as actionable routing sections", () => {
+    const parsed = parseSkillMarkdown(
+      "/tmp/skill",
+      `---
+name: defensive-programming-decision
+description: Decide whether defensive coding is necessary.
+---
+
+# Defensive Programming Decision
+
+## Trigger Scenarios
+
+- PR comments ask to add fallback or extra guard logic.
+
+## Guardrails
+
+- Do not add fallback logic without concrete invariant evidence.
+`,
+    );
+
+    expect(parsed.methodSummaries.map((summary) => summary.methodName)).toEqual(["trigger-scenarios", "guardrails"]);
+    expect(parsed.methodSummaries.flatMap((summary) => summary.triggerTerms)).toEqual(
+      expect.arrayContaining(["fallback", "guard", "invariant", "evidence"]),
+    );
+  });
+
   it("falls back to one conservative summary without an actionable heading", () => {
     const parsed = parseSkillMarkdown(
       "/tmp/skill",

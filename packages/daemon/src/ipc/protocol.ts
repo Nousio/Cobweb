@@ -5,8 +5,10 @@ import type {
   PolicyCheckResult,
   ProjectionPlan,
   ProjectionResult,
+  RoutingWorkItem,
   ScanResult,
   SkillContextResult,
+  SkillGraphChain,
   SkillGraphResult,
   SkillSearchResult,
   SkillSelectResult,
@@ -130,8 +132,12 @@ export interface DaemonMethods {
     params: { path: string; maxDepth?: number; maxPaths?: number; includeExternal?: boolean; watch?: boolean };
     result: SkillGraphResult;
   };
+  skill_chain: {
+    params: { path: string; target: string; maxDepth?: number; maxPaths?: number; includeExternal?: boolean; watch?: boolean };
+    result: SkillGraphChain | null;
+  };
   skill_select: {
-    params: { path: string; query: string; limit?: number };
+    params: { path: string; query: string; limit?: number; workItem?: RoutingWorkItem };
     result: SkillSelectResult;
   };
   skill_context: {

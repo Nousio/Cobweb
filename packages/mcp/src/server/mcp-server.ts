@@ -7,7 +7,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 
 type ToolName = keyof Pick<
   DaemonMethods,
-  "status" | "scan" | "skill_graph" | "skill_search" | "skill_select" | "skill_context" | "skill_validate"
+  "status" | "scan" | "skill_graph" | "skill_chain" | "skill_search" | "skill_select" | "skill_context" | "skill_validate"
 >;
 
 export const mcpTools: Array<{ name: ToolName; description: string; inputSchema: Record<string, unknown> }> = [
@@ -41,6 +41,26 @@ export const mcpTools: Array<{ name: ToolName; description: string; inputSchema:
     },
   },
   {
+    name: "skill_chain",
+    description:
+      "Return the chain for one skill in an in-memory SkillGraph: the root-to-skill path, outgoing skill references, incoming references, and referenced local/external resources. Target may be a skill relative path, absolute path, id, or skill name. No persistence and no audit/risk judgment.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Scan root directory to build the topology from." },
+        target: { type: "string", description: "Skill relative path, absolute path, id, or skill name." },
+        maxDepth: { type: "number", description: "Maximum graph traversal depth (default 32)." },
+        maxPaths: { type: "number", description: "Maximum number of graph paths to enumerate (default 1000)." },
+        includeExternal: { type: "boolean", description: "Include external URL nodes and edges (default true)." },
+        watch: {
+          type: "boolean",
+          description: "Register a daemon file watcher on the root to keep it warm for later skill_search (default false).",
+        },
+      },
+      required: ["path", "target"],
+    },
+  },
+  {
     name: "skill_search",
     description: "Search indexed skills with FTS-backed match reasons.",
     inputSchema: {
@@ -51,11 +71,30 @@ export const mcpTools: Array<{ name: ToolName; description: string; inputSchema:
   },
   {
     name: "skill_select",
-    description: "Select the best indexed skill for a query and explain the recommendation.",
+    description:
+      "Select the best indexed skill for a query with deterministic score breakdown and SkillGraph chain context. Before calling, analyze the user's task and provide `workItem.subject` for the concrete thing being handled; this is required so Cobweb can distinguish raw user text from an agent-analyzed routing request. Pass `query` as analyzed routing terms (intent verb + discriminative subject + optional constraints), NOT the raw user sentence; for a multi-step task (e.g. implement, then review, then trace logic) call this once per step. The result may include a `guidance` object when workItem is missing, input quality is low, or candidate confidence is low (reason one of missing_work_item | no_candidate | query_too_long | missing_subject | top1_confidence_low | top1_gap_small): follow its `checklist` to re-analyze the task and call again. When guidance includes `inspectionTargets`, inspect those absolute skill paths or call `skill_context` for them before using a still-uncertain selection. After a confident selection, call `skill_context` for the chosen skill to get its methods, policy, and resources.",
     inputSchema: {
       type: "object",
-      properties: { path: { type: "string" }, query: { type: "string" }, limit: { type: "number" } },
-      required: ["path", "query"],
+      properties: {
+        path: { type: "string", description: "Scan root directory whose indexed skills are searched." },
+        query: {
+          type: "string",
+          description: "Analyzed routing terms: intent verb + discriminative subject + optional constraints. Avoid raw user sentences and filler words.",
+        },
+        workItem: {
+          type: "object",
+          description: "The agent's analysis of the concrete thing being handled in this step. Required for controlled-agent routing.",
+          properties: {
+            subject: {
+              type: "string",
+              description: "Concrete object under work, such as a module, error, feature, config, skill, or code path.",
+            },
+          },
+          required: ["subject"],
+        },
+        limit: { type: "number", description: "Maximum candidates to consider before selection (default 5)." },
+      },
+      required: ["path", "query", "workItem"],
     },
   },
   {
@@ -113,6 +152,8 @@ export async function dispatchMcpTool(name: ToolName, args: unknown): Promise<un
       return callDaemonForMcp("scan", expectArgs<DaemonMethods["scan"]["params"]>(args));
     case "skill_graph":
       return callDaemonForMcp("skill_graph", expectArgs<DaemonMethods["skill_graph"]["params"]>(args));
+    case "skill_chain":
+      return callDaemonForMcp("skill_chain", expectArgs<DaemonMethods["skill_chain"]["params"]>(args));
     case "skill_search":
       return callDaemonForMcp("skill_search", expectArgs<DaemonMethods["skill_search"]["params"]>(args));
     case "skill_select":

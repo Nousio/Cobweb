@@ -83,8 +83,24 @@ describe("CobwebDatabase", () => {
 
     const result = db.searchSkills("diffs");
     expect(result[0]?.name).toBe("review");
+    expect(result[0]?.scoreBreakdown.length).toBeGreaterThan(0);
     expect(result[0]?.methods[0]?.methodName).toBe("workflow");
     expect(result[0]?.matchReasons.some((reason) => reason.field === "body" || reason.field === "method")).toBe(true);
+  });
+
+  it("matches Chinese tasks with CJK bigram augmented FTS", async () => {
+    const db = await tempDb();
+    db.upsertSkill(
+      makeSkill("/skills/cn-review", {
+        name: "代码审查",
+        description: "审查代码变更并给出反馈",
+        body: "# 流程\n\n检查 Pull Request 的代码变更。",
+      }),
+    );
+
+    const result = db.searchSkills("代码变更");
+    expect(result[0]?.name).toBe("代码审查");
+    expect(result[0]?.score).toBeGreaterThan(0);
   });
 
   it("finds duplicate candidates from the indexed corpus", async () => {

@@ -86,8 +86,17 @@ export interface SearchMatchReason {
   snippet?: string;
 }
 
+export interface SearchScoreBreakdown {
+  signal: string;
+  score: number;
+  weight: number;
+  contribution: number;
+  detail?: string;
+}
+
 export interface SkillSearchCandidate extends SkillCandidate {
   score: number;
+  scoreBreakdown: SearchScoreBreakdown[];
   matchReasons: SearchMatchReason[];
   methods: ParsedMethodSummary[];
 }
@@ -99,10 +108,42 @@ export interface SkillSearchResult {
   warnings: string[];
 }
 
+export type RoutingGuidanceReason =
+  | "missing_work_item"
+  | "no_candidate"
+  | "query_too_long"
+  | "missing_subject"
+  | "top1_confidence_low"
+  | "top1_gap_small";
+
+export interface RoutingWorkItem {
+  subject: string;
+}
+
+export interface RoutingInspectionTarget {
+  path: string;
+  name: string;
+  score: number;
+  matchReasons: SearchMatchReason[];
+}
+
+export interface RoutingGuidance {
+  reason: RoutingGuidanceReason;
+  expects: string[];
+  checklist: string[];
+  inspectionTargets: RoutingInspectionTarget[];
+  example: {
+    intent: string;
+    subject: string;
+    constraints: string[];
+  };
+}
+
 export interface SkillSelectResult {
   query: string;
   freshness: IndexFreshness;
   selected: SkillSearchCandidate | null;
+  chain?: SkillGraphChain | null;
   recommendation: {
     reason: string;
     confidence: number;
@@ -112,6 +153,7 @@ export interface SkillSelectResult {
     name: string;
     reason: string;
   }>;
+  guidance?: RoutingGuidance;
 }
 
 export interface SkillContextResult {
@@ -174,6 +216,25 @@ export interface SkillGraphEdge {
 export interface SkillGraphPath {
   nodes: string[];
   leafKind: SkillGraphNodeKind;
+}
+
+export interface SkillGraphResolvedNode {
+  id: string;
+  node: SkillGraphNode;
+}
+
+export interface SkillGraphNeighbor {
+  node: SkillGraphNode;
+  edge: SkillGraphEdge;
+  direction: "incoming" | "outgoing";
+}
+
+export interface SkillGraphChain {
+  target: SkillGraphNode;
+  references: SkillGraphNeighbor[];
+  referencedBy: SkillGraphNeighbor[];
+  containmentPath: SkillGraphNode[];
+  resources: SkillGraphNeighbor[];
 }
 
 export interface SkillGraphResult {

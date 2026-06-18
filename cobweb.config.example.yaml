@@ -21,6 +21,3 @@ sync:
       enabled: true
     codex:
       enabled: true
-
-embedding:
-  enabled: false

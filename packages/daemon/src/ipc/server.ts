@@ -1,4 +1,4 @@
-import type { SkillSearchResult } from "@cobweb/core";
+import type { RoutingWorkItem, SkillSearchCandidate, SkillSearchResult } from "@cobweb/core";
 import {
   applyProjectionPlan,
   applyVendorPlan,
@@ -8,11 +8,13 @@ import {
   checkPolicyAlignment,
   CobwebError,
   createVendorPlan,
+  evaluateRoutingGuidance,
   importCanonicalSkill,
   lintSkillDirectory,
   parseSkillDirectory,
   readCobwebLockfile,
   scanSkills,
+  skillChain,
   toErrorMessage,
   updateSkillPolicy,
 } from "@cobweb/core";
@@ -27,7 +29,6 @@ import {
   markRootDegraded,
   markRootFresh,
   overallFreshness,
-  rememberWatchRoot,
   rootFreshness,
 } from "../indexing/index-coordinator.js";
 import type { JsonRpcRequest, JsonRpcResponse } from "./protocol.js";
@@ -191,7 +192,9 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
       };
     case "scan": {
       const params = expectParams<{ path: string }>(request.params);
-      rememberWatchRoot(state, resolve(params.path), { persist: false, reason: "scan_registered_root" });
+      // scan is read-only discovery; it must not start a recursive watcher on the
+      // query path, which can stall the daemon on large workspaces. Warm-up happens
+      // through skill_search/skill_graph, which index and watch only SKILL.md files.
       return scanSkills(params.path);
     }
     case "importSkill": {
@@ -317,10 +320,11 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
     case "skill_graph": {
       const params = expectParams<{ path: string; maxDepth?: number; maxPaths?: number; includeExternal?: boolean; watch?: boolean }>(request.params);
       const root = resolve(params.path);
-      // Graph is a read-only topology snapshot; only start a watcher when the caller
-      // explicitly wants to keep the root warm for later skill_search.
+      // Graph is a read-only topology snapshot; only warm the root when the caller
+      // explicitly wants it ready for later skill_search. Warming indexes the root and
+      // watches its SKILL.md files instead of recursively watching the whole tree.
       if (params.watch) {
-        rememberWatchRoot(state, root, { persist: false, reason: "skill_graph_registered_root" });
+        await ensureIndexedRoot(state, root);
       }
       return buildSkillGraph(root, {
         maxDepth: params.maxDepth,
@@ -328,8 +332,23 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
         includeExternal: params.includeExternal,
       });
     }
+    case "skill_chain": {
+      const params = expectParams<{ path: string; target: string; maxDepth?: number; maxPaths?: number; includeExternal?: boolean; watch?: boolean }>(
+        request.params,
+      );
+      const root = resolve(params.path);
+      if (params.watch) {
+        await ensureIndexedRoot(state, root);
+      }
+      const graph = await buildSkillGraph(root, {
+        maxDepth: params.maxDepth,
+        maxPaths: params.maxPaths,
+        includeExternal: params.includeExternal,
+      });
+      return skillChain(graph, params.target);
+    }
     case "skill_select": {
-      const params = expectParams<{ path: string; query: string; limit?: number }>(request.params);
+      const params = expectParams<{ path: string; query: string; limit?: number; workItem?: RoutingWorkItem }>(request.params);
       const result = await dispatch(state, {
         ...request,
         method: "skill_search",
@@ -337,13 +356,16 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
       });
       const search = result as SkillSearchResult;
       const selected = search.candidates[0] ?? null;
+      const chain = selected ? skillChain(await buildSkillGraph(resolve(params.path), { maxDepth: 16, maxPaths: 200 }), selected.path) : null;
+      const guidance = evaluateRoutingGuidance(params.query, search.candidates, params.workItem);
       return {
         query: params.query,
         freshness: search.freshness,
         selected,
+        chain,
         recommendation: selected
           ? {
-            reason: `Selected ${selected.name} because it matched ${selected.matchReasons.map((reason) => reason.field).join(", ")}.`,
+            reason: selectionReason(selected),
             confidence: selected.score,
           }
           : {
@@ -357,6 +379,7 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
             name: candidate.name,
             reason: "Lower ranked match.",
           })),
+        ...(guidance ? { guidance } : {}),
       };
     }
     case "skill_context": {
@@ -405,6 +428,18 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
     default:
       throw new CobwebError("UNKNOWN_METHOD", `Unknown daemon method: ${request.method}`);
   }
+}
+
+function selectionReason(selected: SkillSearchCandidate): string {
+  const strongest = [...selected.scoreBreakdown]
+    .sort((left, right) => right.contribution - left.contribution)
+    .filter((item) => item.contribution > 0)
+    .slice(0, 3)
+    .map((item) => item.signal.replace(/_/g, " "));
+  if (strongest.length === 0) {
+    return `Selected ${selected.name} as the highest ranked indexed skill.`;
+  }
+  return `Selected ${selected.name} because it matched ${strongest.join(", ")}.`;
 }
 
 async function acquireDaemonLock(state: AppState): Promise<void> {
