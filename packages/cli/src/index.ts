@@ -8,6 +8,7 @@ import {
   lintSkillDirectory,
   parseSkillDirectory,
   scanSkills,
+  skillChain,
 } from "@cobweb/core";
 import type { DaemonMethods } from "@cobweb/daemon";
 import { callDaemon } from "@cobweb/daemon/client";
@@ -33,14 +34,27 @@ program
     printJson(await scanSkills(path));
   });
 
-program
+const graphCommand = program
   .command("graph")
+  .description("Build or query the in-memory SkillGraph")
   .argument("[path]", "directory to graph", ".")
   .option("--max-depth <number>", "maximum graph traversal depth", Number.parseInt)
   .option("--max-paths <number>", "maximum number of graph paths to enumerate", Number.parseInt)
   .option("--no-external", "omit external URL nodes")
   .action(async (path: string, options: { maxDepth?: number; maxPaths?: number; external?: boolean }) => {
     printJson(await buildSkillGraph(path, { maxDepth: options.maxDepth, maxPaths: options.maxPaths, includeExternal: options.external }));
+  });
+
+graphCommand
+  .command("chain")
+  .argument("[path]", "directory to graph", ".")
+  .requiredOption("--target <target>", "skill relative path, absolute path, id, or skill name")
+  .option("--max-depth <number>", "maximum graph traversal depth", Number.parseInt)
+  .option("--max-paths <number>", "maximum number of graph paths to enumerate", Number.parseInt)
+  .option("--no-external", "omit external URL nodes")
+  .action(async (path: string, options: { target: string; maxDepth?: number; maxPaths?: number; external?: boolean }) => {
+    const graph = await buildSkillGraph(path, { maxDepth: options.maxDepth, maxPaths: options.maxPaths, includeExternal: options.external });
+    printJson(skillChain(graph, options.target));
   });
 
 program

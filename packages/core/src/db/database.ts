@@ -6,6 +6,8 @@ import { readCobwebLockfile } from "../canonical/lockfile.js";
 import { jaccardSimilarity, tokenizeText } from "../dedup/similarity.js";
 import { sha256 } from "../hash.js";
 import { parseSkillDirectory } from "../parser/skill-parser.js";
+import { rankSkillCandidate } from "../search/rank.js";
+import { segmentText, tokenizeSearchText } from "../search/segment.js";
 import type {
   DuplicateCandidate,
   ParsedMethodSummary,
@@ -259,11 +261,12 @@ export class CobwebDatabase {
     }
 
     const limit = Math.max(1, Math.min(options.limit ?? 10, 50));
+    const recallLimit = Math.max(limit, Math.min(50, Math.max(30, limit * 3)));
     const root = options.root ? normalizePath(options.root).replace(/\/+$/, "") : null;
     const rootClause = root
       ? "AND (REPLACE(s.root_path, char(92), '/') = ? OR REPLACE(s.root_path, char(92), '/') LIKE ? ESCAPE '\\')"
       : "";
-    const queryParams = root ? [ftsQuery, root, `${escapeLikePattern(root)}/%`, limit] : [ftsQuery, limit];
+    const queryParams = root ? [ftsQuery, root, `${escapeLikePattern(root)}/%`, recallLimit] : [ftsQuery, recallLimit];
     const rows = this.db
       .prepare(
         `SELECT
@@ -288,18 +291,28 @@ export class CobwebDatabase {
 
     return rows.map((row) => {
       const matchReasons = matchReasonsForRow(row);
+      const methods = this.methodsForSkill(row.id);
+      const rank = rankSkillCandidate({
+        query,
+        name: row.name,
+        description: row.description ?? "",
+        methods,
+        matchReasons,
+        bm25Rank: row.rank,
+      });
       return {
         path: row.root_path,
-        kind: "skill_dir",
+        kind: "skill_dir" as const,
         name: row.name,
         description: row.description ?? "",
         duplicateOf: null,
         warnings: [],
-        score: scoreSearchRow(row, matchReasons),
+        score: rank.score,
+        scoreBreakdown: rank.scoreBreakdown,
         matchReasons,
-        methods: this.methodsForSkill(row.id),
+        methods,
       };
-    });
+    }).sort((left, right) => right.score - left.score).slice(0, limit);
   }
 
   findDuplicateCandidates(skill: ParsedSkill, options: SkillSearchOptions = {}): DuplicateCandidate[] {
@@ -551,11 +564,11 @@ export class CobwebDatabase {
       )
       .run(
         skillId,
-        skill.name,
-        skill.description,
-        skill.body,
-        skill.sections.map((section) => section.title).join("\n"),
-        skill.methodSummaries.map((summary) => `${summary.methodName}\n${summary.summary}\n${summary.triggerTerms.join(" ")}`).join("\n\n"),
+        segmentText(skill.name),
+        segmentText(skill.description),
+        segmentText(skill.body),
+        segmentText(skill.sections.map((section) => section.title).join("\n")),
+        segmentText(skill.methodSummaries.map((summary) => `${summary.methodName}\n${summary.summary}\n${summary.triggerTerms.join(" ")}`).join("\n\n")),
       );
   }
 
@@ -664,12 +677,7 @@ function booleanToSql(value: boolean | undefined): number | null {
 }
 
 function toFtsQuery(input: string): string {
-  const terms = input
-    .toLowerCase()
-    .split(/[^a-z0-9\u4e00-\u9fff]+/u)
-    .map((token) => token.trim())
-    .filter(Boolean)
-    .slice(0, 16);
+  const terms = tokenizeSearchText(input, 32);
 
   return Array.from(new Set(terms))
     .map((term) => `"${term.replace(/"/g, '""')}"`)
@@ -691,13 +699,6 @@ function snippetReason(field: SearchMatchField, snippet: string | null): SearchM
     return null;
   }
   return { field, signal: "fts_match", snippet };
-}
-
-function scoreSearchRow(row: SearchRow, reasons: SearchMatchReason[]): number {
-  const fieldSignal = Math.min(0.5, reasons.length * 0.12);
-  // bm25 returns negative scores where a larger magnitude is more relevant.
-  const relevanceBoost = Math.min(0.15, Math.abs(row.rank ?? 0) / 100);
-  return Number(Math.min(1, Math.max(0, 0.4 + fieldSignal + relevanceBoost)).toFixed(3));
 }
 
 function duplicateScore(skill: ParsedSkill, candidate: SkillSearchCandidate): number {

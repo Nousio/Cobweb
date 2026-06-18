@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildSkillGraph } from "../../../packages/core/src/graph/skill-graph.js";
+import { buildSkillGraph, skillChain } from "../../../packages/core/src/graph/skill-graph.js";
 
 let roots: string[] = [];
 
@@ -43,6 +43,18 @@ describe("buildSkillGraph", () => {
 
     expect(graph.nodes.some((node) => node.kind === "external")).toBe(false);
     expect(graph.edges.some((edge) => edge.external)).toBe(false);
+  });
+
+  it("derives a single skill chain from the in-memory graph", async () => {
+    const root = await createChainFixture();
+    const graph = await buildSkillGraph(root);
+    const chain = skillChain(graph, "parent");
+
+    expect(chain?.target.name).toBe("parent");
+    expect(chain?.containmentPath.map((node) => node.relativePath)).toEqual([".", "parent"]);
+    expect(chain?.references.some((item) => item.node.relativePath === "child")).toBe(true);
+    expect(chain?.referencedBy.some((item) => item.node.relativePath === "child")).toBe(false);
+    expect(chain?.resources.some((item) => item.edge.rawPath === "../rules/rules.mdc")).toBe(true);
   });
 
   it("marks direct skill reference cycles as invalid and skips them in paths", async () => {
@@ -112,6 +124,21 @@ async function createGraphFixture(): Promise<string> {
     "---\nname: child\ndescription: Child skill\n---\n\n# Child\n\nUse [parent](../SKILL.md).\n",
   );
   await writeFile(join(root, "sibling", "SKILL.md"), "---\nname: sibling\ndescription: Sibling skill\n---\n\n# Sibling\n\nBody.\n");
+  return root;
+}
+
+async function createChainFixture(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "cobweb-skill-chain-"));
+  roots.push(root);
+  await mkdir(join(root, "parent"), { recursive: true });
+  await mkdir(join(root, "child"), { recursive: true });
+  await mkdir(join(root, "rules"), { recursive: true });
+  await writeFile(join(root, "rules", "rules.mdc"), "shared rules\n");
+  await writeFile(
+    join(root, "parent", "SKILL.md"),
+    "---\nname: parent\ndescription: Parent skill\n---\n\n# Parent\n\nUse [rules](../rules/rules.mdc).\nUse [child](../child/SKILL.md).\n",
+  );
+  await writeFile(join(root, "child", "SKILL.md"), "---\nname: child\ndescription: Child skill\n---\n\n# Child\n\nBody.\n");
   return root;
 }
 

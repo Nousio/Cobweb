@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { NoopEmbeddingProvider } from "../../packages/core/src/embedding/provider.js";
 import { CobwebError, toErrorMessage } from "../../packages/core/src/errors.js";
 import { sha256 } from "../../packages/core/src/hash.js";
 import { builtinProviders } from "../../packages/core/src/providers/provider.js";
@@ -32,15 +31,6 @@ describe("errors", () => {
     expect(toErrorMessage(new Error("boom"))).toBe("boom");
     expect(toErrorMessage("plain")).toBe("plain");
     expect(toErrorMessage(42)).toBe("42");
-  });
-});
-
-describe("NoopEmbeddingProvider", () => {
-  it("is disabled in phase one", async () => {
-    const provider = new NoopEmbeddingProvider();
-    expect(provider.model).toBe("disabled");
-    expect(provider.dim).toBe(0);
-    await expect(provider.embed()).rejects.toThrow(/disabled/);
   });
 });
 

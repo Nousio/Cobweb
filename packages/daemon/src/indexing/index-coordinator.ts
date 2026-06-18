@@ -18,7 +18,8 @@ const TRAILING_DEBOUNCE_MS = 250;
 const MAX_DEBOUNCE_WAIT_MS = 2_000;
 const RECENT_INDEX_TASK_LIMIT = 10;
 const WATCH_WRITE_POLL_INTERVAL_MS = 100;
-const WATCH_IGNORED_SEGMENTS = new Set(["node_modules", ".git", "dist"]);
+const SKILL_FILE_NAME = "SKILL.md";
+const WATCH_IGNORED_SEGMENTS = new Set(["node_modules", ".git", ".codegraph", "dist"]);
 
 interface IndexRootLedger {
   version: 1;
@@ -73,7 +74,7 @@ export async function initializeIndexCoordinator(state: AppState): Promise<void>
       watcherState: "starting",
       dirty: false,
     });
-    rememberWatchRoot(state, root.root, { persist: false, reason: "restored_watch_root" });
+    rememberIndexedSkillFileWatcher(state, root.root, { persist: false, reason: "restored_watch_root" });
   }
 
   if (changed) {
@@ -86,11 +87,12 @@ export async function initializeIndexCoordinator(state: AppState): Promise<void>
 
 export async function ensureIndexedRoot(state: AppState, root: string): Promise<string[]> {
   const resolvedRoot = resolve(root);
-  rememberWatchRoot(state, resolvedRoot, { persist: true, reason: "query_registered_root" });
   const rootState = state.indexRoots.get(resolvedRoot);
   const manifest = state.rootManifests.get(resolvedRoot);
   if (!rootState || !manifest || mustFullReconcile(state, resolvedRoot, rootState)) {
-    return indexRoot(state, resolvedRoot, "query_reconcile");
+    const warnings = await indexRoot(state, resolvedRoot, "query_reconcile");
+    rememberIndexedSkillFileWatcher(state, resolvedRoot, { persist: true, reason: "query_registered_root" });
+    return warnings;
   }
 
   const now = Date.now();
@@ -99,7 +101,9 @@ export async function ensureIndexedRoot(state: AppState, root: string): Promise<
     const warnings: string[] = [];
     const currentManifest = await readRootManifestSignature(resolvedRoot, warnings);
     if (!currentManifest || !sameManifestSignature(manifest, currentManifest)) {
-      return indexRoot(state, resolvedRoot, "signature_changed");
+      const reconcileWarnings = await indexRoot(state, resolvedRoot, "signature_changed");
+      rememberIndexedSkillFileWatcher(state, resolvedRoot, { persist: true, reason: "query_registered_root" });
+      return reconcileWarnings;
     }
     updateRootState(state, resolvedRoot, {
       lastCheckedAt: new Date(now).toISOString(),
@@ -107,6 +111,7 @@ export async function ensureIndexedRoot(state: AppState, root: string): Promise<
       lastCheckKind: "signature_check",
       lastIndexError: rootState.lastIndexError,
     });
+    rememberIndexedSkillFileWatcher(state, resolvedRoot, { persist: true, reason: "query_registered_root" });
     return warnings;
   }
 
@@ -114,6 +119,7 @@ export async function ensureIndexedRoot(state: AppState, root: string): Promise<
     lastCheckedAt: new Date(now).toISOString(),
     lastCheckKind: "fast_path",
   });
+  rememberIndexedSkillFileWatcher(state, resolvedRoot, { persist: true, reason: "query_registered_root" });
   return [];
 }
 
@@ -282,24 +288,47 @@ export function scheduleIndexRoot(state: AppState, root: string, reason = "watch
   state.indexTimers.set(resolvedRoot, { timer, firstScheduledAt });
 }
 
-export function rememberWatchRoot(
+export function rememberIndexedSkillFileWatcher(
   state: AppState,
   root: string,
   options: { persist?: boolean; reason?: string } = {},
 ): void {
   const resolvedRoot = resolve(root);
-  if (state.watchRoots.has(resolvedRoot)) {
-    updateRootState(state, resolvedRoot, { watching: state.indexRoots.get(resolvedRoot)?.watcherState !== "unavailable" });
+  const existingRoot = state.indexRoots.get(resolvedRoot);
+  if (existingRoot?.watcherState === "unavailable") {
+    return;
+  }
+  if (state.watchers.has(resolvedRoot)) {
+    updateRootState(state, resolvedRoot, { watching: true });
+    return;
+  }
+
+  const skillRoots = state.rootManifests.get(resolvedRoot)?.skillRoots
+    ?? state.db.listSkillContentHashesUnderRoot(resolvedRoot).map((record) => record.path).sort();
+  const watchPaths = skillRoots.map((skillRoot) => join(skillRoot, SKILL_FILE_NAME));
+
+  if (watchPaths.length === 0) {
+    updateRootState(state, resolvedRoot, {
+      reason: options.reason ?? "query_registered_root",
+      watching: false,
+      watcherState: "ready",
+    });
+    state.watchRoots.add(resolvedRoot);
+    if (options.persist ?? true) {
+      void state.writer.enqueue("PersistIndexRoots", async () => {
+        writeIndexLedger(state);
+      });
+    }
     return;
   }
 
   try {
     updateRootState(state, resolvedRoot, {
-      reason: options.reason ?? "watch_registering",
+      reason: options.reason ?? "query_registered_root",
       watching: true,
       watcherState: "starting",
     });
-    const watcher = watch(resolvedRoot, {
+    const watcher = watch(watchPaths, {
       ignoreInitial: true,
       awaitWriteFinish: {
         stabilityThreshold: watchStabilityThreshold(state),
@@ -310,7 +339,7 @@ export function rememberWatchRoot(
     });
     watcher.on("ready", () => {
       updateRootState(state, resolvedRoot, {
-        reason: options.reason ?? "watch_registered",
+        reason: options.reason ?? "query_registered_root",
         watching: true,
         watcherState: "ready",
       });

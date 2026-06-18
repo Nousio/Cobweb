@@ -27,6 +27,7 @@ Every command prints JSON, so results are easy to read or pipe into other tools.
 | --- | --- |
 | `scan` | Discover every `SKILL.md` under a directory and report the skills it finds. |
 | `graph` | Build a read-only SkillGraph showing skill hierarchy and document references from a scan root. |
+| `graph chain` | Show one skill's chain: root path, referenced skills, incoming references, and resources. |
 | `lint` | Check a skill's description length, body length, and resource references. |
 | `dedup` | Detect duplicate or near-duplicate skills by content hash, name, and lexical similarity. |
 | `import` | Preview, then write, a skill into the local canonical store. |
@@ -43,6 +44,7 @@ Inspect skills (read-only, no daemon needed):
 ```bash
 cobweb scan ./skills
 cobweb graph ./skills
+cobweb graph chain ./skills --target my-skill
 cobweb lint ./skills/my-skill
 cobweb dedup ./skills
 ```
@@ -96,8 +98,9 @@ The MCP server exposes the same local governance model to agents:
 
 - `status` and `scan` report daemon health and discovered skills.
 - `skill_graph` builds a topology graph of skill directories and document references from a scan root.
-- `skill_search` searches the daemon-managed FTS index and returns candidates with scores, match reasons, and freshness.
-- `skill_select` chooses the best indexed candidate and explains the recommendation.
+- `skill_chain` returns one skill's root path, referenced skills, incoming references, and resources.
+- `skill_search` searches the daemon-managed FTS index and returns candidates with scores, score breakdowns, match reasons, and freshness.
+- `skill_select` chooses the best indexed candidate and returns its recommendation plus SkillGraph chain context. MCP callers must pass an analyzed `workItem.subject` alongside the routing query. When the work item is missing, input quality is low, or candidate confidence is low, the result also includes a `guidance` object (a reason, actionable checklist, and candidate `inspectionTargets`) so the calling agent can re-analyze the task, re-express the query, or inspect absolute skill paths before using an uncertain selection.
 - `skill_context` returns method summaries, resources, policy, and lint context for one skill.
 - `skill_validate` combines lint, policy, and indexed duplicate checks before a skill is used or imported.
 
@@ -105,13 +108,13 @@ If the daemon is not reachable, `cobweb-mcp` does not start it for you. Start th
 
 ## Index Freshness
 
-`skill_search` and `skill_select` include a `freshness` field:
+`skill_search` and `skill_select` include a `freshness` field. Search uses SQLite FTS5 with CJK bigram text augmentation, then applies a deterministic re-rank over name coverage, Method trigger terms, descriptions, field coverage, and BM25. Returned scores are local, explainable matching signals for agents; Cobweb does not run embedding models or call external AI APIs.
 
 - `fresh` means Cobweb has reconciled the requested root and, while the root remains warm, can answer repeated queries from its in-memory manifest without rereading every `SKILL.md`.
 - `rebuilding` means an index task is running or queued.
 - `degraded` means Cobweb can still answer from the local index, but a watcher, parser, schema, or recent reconcile issue needs attention.
 
-Cobweb uses a bounded staleness budget for warm roots. The default is `2000ms`; set `COBWEB_MAX_STALENESS_MS` to tune it. Within that budget, a clean warm root can use the fast path. After the time since the last real disk verification expires, Cobweb checks the `SKILL.md` path list plus `size` and `mtimeMs`; if the signature changed, it performs a full content-hash reconcile. If the watcher is unavailable, the root falls back to full content-hash reconcile on every query.
+Cobweb uses a bounded staleness budget for warm roots. The default is `2000ms`; set `COBWEB_MAX_STALENESS_MS` to tune it. Within that budget, a clean warm root can use the fast path. After the time since the last real disk verification expires, Cobweb checks the `SKILL.md` path list plus `size` and `mtimeMs`; if the signature changed, it performs a full content-hash reconcile. To avoid recursively watching large workspaces, `skill_search` keeps indexed roots warm by watching the known `SKILL.md` files rather than the whole query root. If the watcher is unavailable, the root falls back to full content-hash reconcile on every query.
 
 Use `cobweb daemon status` for the human-readable root diagnostics. It shows watcher state, dirty roots, in-flight indexing, fast-path eligibility, the staleness budget, last query check time, last disk verification time, last full reconcile time, and the last per-root index error. `cobweb daemon doctor` checks SQLite quick health, foreign keys, schema shape, and FTS/index consistency; if it reports index drift, run `cobweb daemon repair` or search the affected root to reconcile it.
 
@@ -119,4 +122,4 @@ Use `cobweb daemon status` for the human-readable root diagnostics. It shows wat
 
 `cobwebd` is a local, single-user write proxy. For write commands such as `import --write`, `sync --write`, `policy` updates, and `vendor --write`, it reads and writes the paths your CLI or MCP client supplies, so only run them against trusted workspaces and skill directories. The daemon creates its data directory as `0700`, its pid lock as `0600`, and its socket as `0600`. Absolute resource references are reported for manual review rather than vendored automatically.
 
-The daemon remembers explicitly indexed roots so it can restore their file watchers after a restart. Restored roots are not treated as fresh until the next query or file event reconciles their `SKILL.md` content hashes. Cobweb hashes only the `SKILL.md` source for index freshness; changes that only touch `scripts/`, `references/`, or `assets/` are reflected by live validation tools, while cached methods and FTS content update on the next `SKILL.md` reconcile or repair.
+The daemon remembers explicitly indexed roots so it can restore watchers for their indexed `SKILL.md` files after a restart. Restored roots are not treated as fresh until the next query or file event reconciles their `SKILL.md` content hashes. Cobweb hashes only the `SKILL.md` source for index freshness; changes that only touch `scripts/`, `references/`, or `assets/` are reflected by live validation tools, while cached methods and FTS content update on the next `SKILL.md` reconcile or repair.

@@ -1,12 +1,13 @@
 import { access } from "node:fs/promises";
 import { dirname, join, normalize, relative, resolve } from "node:path";
 import { sha256 } from "../hash.js";
-import { parseSkillDirectory } from "../parser/skill-parser.js";
+import { parseSkillGraphEntry, type ParsedSkillGraphEntry } from "../parser/skill-parser.js";
 import { findSkillDirectories } from "../scan/scan.js";
 import type {
   ParsedResource,
-  ParsedSkill,
+  SkillGraphChain,
   SkillGraphEdge,
+  SkillGraphNeighbor,
   SkillGraphNode,
   SkillGraphPath,
   SkillGraphResult
@@ -22,7 +23,7 @@ interface ParsedGraphSkill {
   rootPath: string;
   relativePath: string;
   depth: number;
-  skill: ParsedSkill;
+  skill: ParsedSkillGraphEntry;
 }
 
 const DEFAULT_MAX_DEPTH = 32;
@@ -81,11 +82,92 @@ export async function buildSkillGraph(scanRoot: string, options: SkillGraphOptio
   };
 }
 
+export function resolveSkillGraphNode(graph: SkillGraphResult, target: string): { id: string; node: SkillGraphNode } | null {
+  const normalizedTarget = normalizePath(target);
+  const lowerTarget = target.toLowerCase();
+  const pathMatch = graph.nodes.find((candidate) =>
+    candidate.id === target
+    || normalizePath(candidate.relativePath) === normalizedTarget
+    || normalizePath(candidate.path) === normalizedTarget
+  );
+  if (pathMatch) {
+    return { id: pathMatch.id, node: pathMatch };
+  }
+  const node = graph.nodes.find((candidate) => candidate.kind === "skill" && candidate.name?.toLowerCase() === lowerTarget);
+  return node ? { id: node.id, node } : null;
+}
+
+export function referencesBy(graph: SkillGraphResult, target: string): SkillGraphNeighbor[] {
+  const resolved = resolveSkillGraphNode(graph, target);
+  if (!resolved) {
+    return [];
+  }
+  const nodes = nodeMap(graph);
+  return activeEdges(graph)
+    .filter((edge) => edge.to === resolved.id && (edge.kind === "references" || edge.kind === "references_skill"))
+    .map((edge) => neighbor(nodes, edge, "incoming"))
+    .filter((item): item is SkillGraphNeighbor => Boolean(item))
+    .sort(compareNeighbors);
+}
+
+export function neighbors(graph: SkillGraphResult, target: string): SkillGraphNeighbor[] {
+  const resolved = resolveSkillGraphNode(graph, target);
+  if (!resolved) {
+    return [];
+  }
+  const nodes = nodeMap(graph);
+  return activeEdges(graph)
+    .flatMap((edge) => {
+      if (edge.from === resolved.id) {
+        return neighbor(nodes, edge, "outgoing") ?? [];
+      }
+      if (edge.to === resolved.id) {
+        return neighbor(nodes, edge, "incoming") ?? [];
+      }
+      return [];
+    })
+    .sort(compareNeighbors);
+}
+
+export function pathToSkill(graph: SkillGraphResult, target: string): SkillGraphNode[] {
+  const resolved = resolveSkillGraphNode(graph, target);
+  if (!resolved) {
+    return [];
+  }
+  const nodes = nodeMap(graph);
+  const matching = graph.paths
+    .map((path) => {
+      const index = path.nodes.indexOf(resolved.id);
+      return index >= 0 ? path.nodes.slice(0, index + 1) : [];
+    })
+    .filter((path) => path.length > 0)
+    .sort((left, right) => left.length - right.length)[0];
+  if (!matching) {
+    return [resolved.node];
+  }
+  return matching.map((id) => nodes.get(id)).filter((node): node is SkillGraphNode => Boolean(node));
+}
+
+export function skillChain(graph: SkillGraphResult, target: string): SkillGraphChain | null {
+  const resolved = resolveSkillGraphNode(graph, target);
+  if (!resolved) {
+    return null;
+  }
+  const allNeighbors = neighbors(graph, resolved.id);
+  return {
+    target: resolved.node,
+    references: allNeighbors.filter((item) => item.direction === "outgoing" && item.edge.kind === "references_skill"),
+    referencedBy: referencesBy(graph, resolved.id),
+    containmentPath: pathToSkill(graph, resolved.id).filter((node) => node.kind === "scan_root" || node.kind === "skill"),
+    resources: allNeighbors.filter((item) => item.direction === "outgoing" && item.edge.kind === "references"),
+  };
+}
+
 async function parseSkills(root: string, skillRoots: string[], warnings: string[]): Promise<ParsedGraphSkill[]> {
   const results = await Promise.allSettled(
     skillRoots.map(async (skillRoot) => {
       const resolvedRoot = resolve(skillRoot);
-      const skill = await parseSkillDirectory(resolvedRoot);
+      const skill = await parseSkillGraphEntry(resolvedRoot);
       const rel = relativePath(root, resolvedRoot);
       return {
         rootPath: resolvedRoot,
@@ -325,6 +407,35 @@ function reaches(
   }
   seen.add(current);
   return (byFrom.get(current) ?? []).some((edge) => reaches(edge.to, target, byFrom, seen));
+}
+
+function nodeMap(graph: SkillGraphResult): Map<string, SkillGraphNode> {
+  return new Map(graph.nodes.map((node) => [node.id, node]));
+}
+
+function activeEdges(graph: SkillGraphResult): SkillGraphEdge[] {
+  return graph.edges.filter((edge) => !edge.invalidCycle);
+}
+
+function neighbor(
+  nodes: Map<string, SkillGraphNode>,
+  edge: SkillGraphEdge,
+  direction: SkillGraphNeighbor["direction"],
+): SkillGraphNeighbor | null {
+  const node = nodes.get(direction === "outgoing" ? edge.to : edge.from);
+  return node ? { node, edge, direction } : null;
+}
+
+function compareNeighbors(left: SkillGraphNeighbor, right: SkillGraphNeighbor): number {
+  const direction = left.direction.localeCompare(right.direction);
+  if (direction !== 0) {
+    return direction;
+  }
+  const kind = left.edge.kind.localeCompare(right.edge.kind);
+  if (kind !== 0) {
+    return kind;
+  }
+  return left.node.relativePath.localeCompare(right.node.relativePath);
 }
 
 function skillNode(entry: ParsedGraphSkill): SkillGraphNode {

@@ -106,17 +106,48 @@ describe("daemon IPC", () => {
     expect(status.index.roots.some((entry) => entry.root === resolve(graphRoot))).toBe(false);
   });
 
-  it("registers a watcher for skill_graph only when watch is requested", async () => {
+  it("returns a SkillGraph chain through the daemon", async () => {
+    const graphRoot = await mkdtemp(join(tmpdir(), "cobweb-daemon-chain-"));
+    const parentSkill = join(graphRoot, "parent");
+    const childSkill = join(graphRoot, "child");
+    await mkdir(parentSkill, { recursive: true });
+    await mkdir(childSkill, { recursive: true });
+    await writeFile(join(parentSkill, "SKILL.md"), "---\nname: parent\ndescription: Parent\n---\n\n# Parent\n\nUse [child](../child/SKILL.md).\n");
+    await writeFile(join(childSkill, "SKILL.md"), "---\nname: child\ndescription: Child\n---\n\n# Child\n\nBody.\n");
+
+    const result = await callDaemon("skill_chain", { path: graphRoot, target: "parent" }, socketPath);
+
+    expect(result?.target.name).toBe("parent");
+    expect(result?.references.some((item) => item.node.relativePath === "child")).toBe(true);
+    expect(result?.containmentPath.map((node) => node.relativePath)).toEqual([".", "parent"]);
+  });
+
+  it("warms the root and watches its SKILL.md files for skill_graph only when watch is requested", async () => {
     const watchRoot = await mkdtemp(join(tmpdir(), "cobweb-daemon-graph-watch-"));
     const watchSkill = join(watchRoot, "workflow");
     await mkdir(watchSkill, { recursive: true });
     await writeFile(join(watchSkill, "SKILL.md"), "---\nname: workflow\ndescription: Workflow\n---\n\n# Workflow\n\nBody.\n");
 
-    await callDaemon("skill_graph", { path: watchRoot, watch: true }, socketPath);
-    await waitForRootStatus(socketPath, resolve(watchRoot), (root) => root.watching);
+    const watchSocket = join(watchRoot, "cobwebd.sock");
+    const watchState = createAppState({
+      dataDir: watchRoot,
+      dbPath: join(watchRoot, "cobweb.db"),
+      socketPath: watchSocket,
+      lockPath: join(watchRoot, "lock.yaml"),
+    });
+    const watchServer = await startIpcServer(watchState);
 
-    const status = await callDaemon("status", undefined, socketPath);
-    expect(status.index.roots.find((entry) => entry.root === resolve(watchRoot))?.watching).toBe(true);
+    try {
+      await callDaemon("skill_graph", { path: watchRoot, watch: true }, watchSocket);
+      await waitForRootStatus(watchSocket, resolve(watchRoot), (root) => root.watching);
+
+      const status = await callDaemon("status", undefined, watchSocket);
+      expect(status.index.roots.find((entry) => entry.root === resolve(watchRoot))?.watching).toBe(true);
+      const watchedPaths = Object.keys(watchState.watchers.get(resolve(watchRoot))?.getWatched() ?? {});
+      expect(watchedPaths).toContain(resolve(watchSkill));
+    } finally {
+      await watchServer.close();
+    }
   });
 
   it("imports a skill via the Writer Queue and reflects it in status", async () => {
@@ -149,6 +180,35 @@ describe("daemon IPC", () => {
     expect(result.freshness).toBe("fresh");
     expect(result.candidates[0]?.name).toBe("review");
     expect(result.candidates[0]?.matchReasons.length).toBeGreaterThan(0);
+  });
+
+  it("watches indexed SKILL.md files without recursively watching the query root", async () => {
+    const broadDir = await mkdtemp(join(tmpdir(), "cobweb-broad-root-"));
+    const broadSkill = join(broadDir, "skills", "review");
+    const noiseDir = join(broadDir, "workspace", "repo", "logs");
+    await mkdir(broadSkill, { recursive: true });
+    await mkdir(noiseDir, { recursive: true });
+    await writeFile(join(broadSkill, "SKILL.md"), "---\nname: broad-review\ndescription: Broad review\n---\n\n# Body\n\nReview body.\n");
+
+    const broadSocket = join(broadDir, "cobwebd.sock");
+    const broadState = createAppState({
+      dataDir: broadDir,
+      dbPath: join(broadDir, "cobweb.db"),
+      socketPath: broadSocket,
+      lockPath: join(broadDir, "lock.yaml"),
+    });
+    const broadServer = await startIpcServer(broadState);
+
+    try {
+      await callDaemon("skill_search", { path: broadDir, query: "review" }, broadSocket);
+      await waitForRootStatus(broadSocket, broadDir, (root) => root.watcherState === "ready");
+
+      const watchedPaths = Object.keys(broadState.watchers.get(broadDir)?.getWatched() ?? {});
+      expect(watchedPaths).toContain(broadSkill);
+      expect(watchedPaths).not.toContain(noiseDir);
+    } finally {
+      await broadServer.close();
+    }
   });
 
   it("uses content hashes to skip unchanged roots on later searches", async () => {
@@ -484,7 +544,40 @@ describe("daemon IPC", () => {
   it("selects the best low-risk skill with a recommendation", async () => {
     const result = await callDaemon("skill_select", { path: skillRoot, query: "review" }, socketPath);
     expect(result.selected?.name).toBe("review");
+    expect(result.selected?.scoreBreakdown.length).toBeGreaterThan(0);
+    expect(result.chain?.target.name).toBe("review");
     expect(result.recommendation.confidence).toBeGreaterThan(0);
+    expect(result.guidance?.reason).toBe("missing_work_item");
+  });
+
+  it("keeps the selected candidate while returning low-confidence guidance", async () => {
+    const result = await callDaemon("skill_select", {
+      path: skillRoot,
+      query: "review alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu",
+      workItem: { subject: "pull request" },
+    }, socketPath);
+    expect(result.selected?.name).toBe("review");
+    expect(result.recommendation.confidence).toBeGreaterThan(0);
+    expect(result.rejected).toEqual([]);
+    expect(result.chain?.target.name).toBe("review");
+    expect(["query_too_long", "top1_confidence_low"]).toContain(result.guidance?.reason);
+    expect(result.guidance?.inspectionTargets[0]).toMatchObject({
+      path: skillRoot,
+      name: "review",
+    });
+  });
+
+  it("returns no_candidate guidance when nothing matches", async () => {
+    const result = await callDaemon("skill_select", {
+      path: skillRoot,
+      query: "zzzznomatchquery",
+      workItem: { subject: "unknown daemon issue" },
+    }, socketPath);
+    expect(result.selected).toBeNull();
+    expect(result.recommendation.confidence).toBe(0);
+    expect(result.guidance?.reason).toBe("no_candidate");
+    expect(Array.isArray(result.guidance?.checklist)).toBe(true);
+    expect(result.guidance?.inspectionTargets).toEqual([]);
   });
 
   it("returns skill context with methods, resources, and policy", async () => {
