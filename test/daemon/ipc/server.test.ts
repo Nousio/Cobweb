@@ -564,6 +564,7 @@ describe("daemon IPC", () => {
     expect(result.guidance?.inspectionTargets[0]).toMatchObject({
       path: skillRoot,
       name: "review",
+      kind: "skill",
     });
   });
 
@@ -577,7 +578,13 @@ describe("daemon IPC", () => {
     expect(result.recommendation.confidence).toBe(0);
     expect(result.guidance?.reason).toBe("no_candidate");
     expect(Array.isArray(result.guidance?.checklist)).toBe(true);
-    expect(result.guidance?.inspectionTargets).toEqual([]);
+    expect(result.guidance?.inspectionTargets).toEqual([
+      expect.objectContaining({
+        path: skillRoot,
+        name: "scan root",
+        kind: "scan_root",
+      }),
+    ]);
   });
 
   it("returns skill context with methods, resources, and policy", async () => {

@@ -356,8 +356,11 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
       });
       const search = result as SkillSearchResult;
       const selected = search.candidates[0] ?? null;
-      const chain = selected ? skillChain(await buildSkillGraph(resolve(params.path), { maxDepth: 16, maxPaths: 200 }), selected.path) : null;
-      const guidance = evaluateRoutingGuidance(params.query, search.candidates, params.workItem);
+      const root = resolve(params.path);
+      const chain = selected ? skillChain(await buildSkillGraph(root, { maxDepth: 16, maxPaths: 200 }), selected.path) : null;
+      const guidance = evaluateRoutingGuidance(params.query, search.candidates, params.workItem, {
+        inspectionFallbackPaths: [root],
+      });
       return {
         query: params.query,
         freshness: search.freshness,
