@@ -50,6 +50,7 @@ export interface DaemonStatus {
   writer: WriterQueueSnapshot;
   lastError: string | null;
   index: DaemonIndexStatus;
+  runtime: DaemonRuntimeStatus;
 }
 
 export interface DaemonIndexRootStatus {
@@ -87,10 +88,44 @@ export interface DaemonIndexStatus {
   recent: DaemonIndexRecentTask[];
 }
 
+export interface DaemonLeaseSnapshot {
+  id: string;
+  client: string;
+  pid: number | null;
+  transport: string;
+  attachedAt: string;
+  lastHeartbeatAt: string;
+  expiresAt: string;
+  socketBound: boolean;
+}
+
+export interface DaemonRuntimeStatus {
+  activeRequests: number;
+  activeLeases: DaemonLeaseSnapshot[];
+  idleTimeoutMs: number;
+  idleGraceMs: number;
+  leaseTtlMs: number;
+  lastActivityAt: string;
+  idleDeadline: string | null;
+  lastShutdownReason: string | null;
+}
+
 export interface DaemonMethods {
   status: {
     params: undefined;
     result: DaemonStatus;
+  };
+  leaseAttach: {
+    params: { client: string; pid?: number; transport?: string; ttlMs?: number; socketBound?: boolean };
+    result: { leaseId: string; expiresAt: string };
+  };
+  leaseHeartbeat: {
+    params: { leaseId: string; ttlMs?: number };
+    result: { ok: true; expiresAt: string };
+  };
+  leaseDetach: {
+    params: { leaseId: string };
+    result: { detached: true };
   };
   scan: {
     params: { path: string };

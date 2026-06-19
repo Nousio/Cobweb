@@ -1,27 +1,47 @@
-# Cobweb
+# openCobweb
 
-One-step installer package for Cobweb CLI, daemon, and MCP server.
+<sub>License: AGPL-3.0-only.</sub>
 
-```bash
-npm install -g cobweb
-cobweb --help
+openCobweb is an MCP server package for working with local Agent Skills from MCP-compatible clients.
+
+## Use with npx
+
+Add openCobweb to your MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "cobweb": {
+      "command": "npx",
+      "args": ["-y", "--package", "opencobweb", "cobweb-mcp"]
+    }
+  }
+}
 ```
 
-This package exposes the public commands and bundles the internal workspace packages:
+## Global Installation
 
-- `cobweb` / `cw`: user-facing CLI.
-- `cobwebd`: local daemon.
-- `cobweb-mcp`: MCP stdio server.
-
-`cobweb` handles local read-only commands directly and sends writes through the daemon Writer Queue. `cobweb-mcp` only forwards to an already running local daemon; start it with `cobweb daemon start` before MCP use.
-
-The MCP server exposes `status`, `scan`, `skill_graph`, `skill_chain`, FTS-backed `skill_search`, explainable `skill_select`, `skill_context`, and `skill_validate`.
-
-To make a skill available for `sync`, import it with a canonical store path so it is recorded in `cobweb.lock.yaml`:
+If your MCP client does not run packages through `npx`, install openCobweb first:
 
 ```bash
-cobweb import ./skills/my-skill --write --canonical ~/.local/share/cobweb/skills
-cobweb sync --target agents,cursor --write
+npm install -g opencobweb
 ```
 
-The internal `@cobweb/*` packages remain separate so the core, daemon, CLI, and MCP boundaries stay explicit.
+Then configure your MCP client to run the installed command:
+
+```json
+{
+  "mcpServers": {
+    "cobweb": {
+      "command": "cobweb-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+## Runtime Lifecycle
+
+`cobweb-mcp` connects to or starts one local `cobwebd` runtime, opens a runtime lease for the MCP session, and keeps the daemon alive while that lease is active. After the MCP session disconnects and the lease is released or expires, the daemon returns to its normal idle shutdown policy.
+
+openCobweb requires Node.js `>=22`.

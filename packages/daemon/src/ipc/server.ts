@@ -18,10 +18,11 @@ import {
   toErrorMessage,
   updateSkillPolicy,
 } from "@cobweb/core";
+import { randomUUID } from "node:crypto";
 import { access, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import type { AppState } from "../app-state/app-state.js";
+import type { AppState, RuntimeLease } from "../app-state/app-state.js";
 import {
   ensureIndexedRoot,
   indexStatusSnapshot,
@@ -31,10 +32,14 @@ import {
   overallFreshness,
   rootFreshness,
 } from "../indexing/index-coordinator.js";
-import type { JsonRpcRequest, JsonRpcResponse } from "./protocol.js";
+import type { DaemonLeaseSnapshot, DaemonRuntimeStatus, JsonRpcRequest, JsonRpcResponse } from "./protocol.js";
 
 export interface DaemonServer {
   close(): Promise<void>;
+}
+
+interface ConnectionContext {
+  leaseIds: Set<string>;
 }
 
 export async function startIpcServer(state: AppState): Promise<DaemonServer> {
@@ -52,6 +57,11 @@ export async function startIpcServer(state: AppState): Promise<DaemonServer> {
   let idleTimer: NodeJS.Timeout | null = null;
   const server = net.createServer((socket) => {
     let buffer = "";
+    const context: ConnectionContext = { leaseIds: new Set() };
+
+    socket.on("close", () => {
+      releaseConnectionLeases(state, context);
+    });
 
     socket.on("data", (chunk) => {
       buffer += chunk.toString("utf8");
@@ -65,7 +75,7 @@ export async function startIpcServer(state: AppState): Promise<DaemonServer> {
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
 
-        void handleLine(state, line).then((response) => {
+        void handleLine(state, line, context).then((response) => {
           socket.write(`${JSON.stringify(response)}\n`);
           if (response.ok && response.result && typeof response.result === "object" && "stopping" in response.result) {
             void stopServer(state, server, () => {
@@ -157,28 +167,38 @@ async function isSocketAlive(socketPath: string): Promise<boolean> {
   });
 }
 
-async function handleLine(state: AppState, line: string): Promise<JsonRpcResponse> {
-  state.lastRequestAt = Date.now();
-  let request: JsonRpcRequest;
+async function handleLine(state: AppState, line: string, context: ConnectionContext): Promise<JsonRpcResponse> {
+  const startedAt = Date.now();
+  state.lastRequestAt = startedAt;
+  state.lastActivityAt = startedAt;
+  state.activeRequests += 1;
 
   try {
-    request = JSON.parse(line) as JsonRpcRequest;
-  } catch (error) {
-    return failure("unknown", new CobwebError("BAD_JSON", "Invalid JSON-RPC request.", { cause: error }));
-  }
+    let request: JsonRpcRequest;
 
-  try {
-    const result = await dispatch(state, request);
-    return { id: request.id, ok: true, result };
-  } catch (error) {
-    state.lastError = toErrorMessage(error);
-    return failure(request.id, error);
+    try {
+      request = JSON.parse(line) as JsonRpcRequest;
+    } catch (error) {
+      return failure("unknown", new CobwebError("BAD_JSON", "Invalid JSON-RPC request.", { cause: error }));
+    }
+
+    try {
+      const result = await dispatch(state, request, context);
+      return { id: request.id, ok: true, result };
+    } catch (error) {
+      state.lastError = toErrorMessage(error);
+      return failure(request.id, error);
+    }
+  } finally {
+    state.activeRequests = Math.max(0, state.activeRequests - 1);
+    state.lastActivityAt = Date.now();
   }
 }
 
-async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unknown> {
+async function dispatch(state: AppState, request: JsonRpcRequest, context: ConnectionContext): Promise<unknown> {
   switch (request.method) {
     case "status":
+      sweepExpiredLeases(state);
       return {
         running: true,
         pid: process.pid,
@@ -189,7 +209,47 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
         writer: state.writer.snapshot(),
         lastError: state.lastError,
         index: indexStatusSnapshot(state),
+        runtime: runtimeStatus(state, 1),
       };
+    case "leaseAttach": {
+      const params = expectParams<{ client: string; pid?: number; transport?: string; ttlMs?: number; socketBound?: boolean }>(
+        request.params,
+      );
+      const now = Date.now();
+      const lease: RuntimeLease = {
+        id: randomUUID(),
+        client: params.client,
+        pid: typeof params.pid === "number" ? params.pid : null,
+        transport: params.transport ?? "unknown",
+        attachedAt: new Date(now).toISOString(),
+        lastHeartbeatAt: new Date(now).toISOString(),
+        expiresAt: now + readLeaseTtlMs(state, params.ttlMs),
+        socketBound: params.socketBound ?? false,
+      };
+      state.leases.set(lease.id, lease);
+      if (lease.socketBound) {
+        context.leaseIds.add(lease.id);
+      }
+      return { leaseId: lease.id, expiresAt: new Date(lease.expiresAt).toISOString() };
+    }
+    case "leaseHeartbeat": {
+      const params = expectParams<{ leaseId: string; ttlMs?: number }>(request.params);
+      const lease = state.leases.get(params.leaseId);
+      if (!lease) {
+        throw new CobwebError("LEASE_NOT_FOUND", `Runtime lease is not active: ${params.leaseId}`, { retryable: true });
+      }
+      const now = Date.now();
+      lease.lastHeartbeatAt = new Date(now).toISOString();
+      lease.expiresAt = now + readLeaseTtlMs(state, params.ttlMs);
+      return { ok: true, expiresAt: new Date(lease.expiresAt).toISOString() };
+    }
+    case "leaseDetach": {
+      const params = expectParams<{ leaseId: string }>(request.params);
+      state.leases.delete(params.leaseId);
+      context.leaseIds.delete(params.leaseId);
+      state.lastActivityAt = Date.now();
+      return { detached: true };
+    }
     case "scan": {
       const params = expectParams<{ path: string }>(request.params);
       // scan is read-only discovery; it must not start a recursive watcher on the
@@ -353,7 +413,7 @@ async function dispatch(state: AppState, request: JsonRpcRequest): Promise<unkno
         ...request,
         method: "skill_search",
         params: { ...params, limit: params.limit ?? 5 },
-      });
+      }, context);
       const search = result as SkillSearchResult;
       const selected = search.candidates[0] ?? null;
       const root = resolve(params.path);
@@ -445,6 +505,69 @@ function selectionReason(selected: SkillSearchCandidate): string {
   return `Selected ${selected.name} because it matched ${strongest.join(", ")}.`;
 }
 
+function runtimeStatus(state: AppState, currentRequestOffset = 0): DaemonRuntimeStatus {
+  const activeLeases = activeLeaseSnapshots(state);
+  const activeRequests = Math.max(0, state.activeRequests - currentRequestOffset);
+  const writer = state.writer.snapshot();
+  const hasIdleBlockers =
+    activeLeases.length > 0 ||
+    activeRequests > 0 ||
+    writer.pending > 0 ||
+    writer.running !== null ||
+    state.indexTimers.size > 0 ||
+    state.indexInFlight.size > 0;
+  const idleDeadline = hasIdleBlockers ? null : new Date(state.lastActivityAt + Math.max(state.idleTimeoutMs, state.idleGraceMs)).toISOString();
+
+  return {
+    activeRequests,
+    activeLeases,
+    idleTimeoutMs: state.idleTimeoutMs,
+    idleGraceMs: state.idleGraceMs,
+    leaseTtlMs: state.leaseTtlMs,
+    lastActivityAt: new Date(state.lastActivityAt).toISOString(),
+    idleDeadline,
+    lastShutdownReason: state.lastShutdownReason,
+  };
+}
+
+function activeLeaseSnapshots(state: AppState): DaemonLeaseSnapshot[] {
+  sweepExpiredLeases(state);
+  return Array.from(state.leases.values()).map((lease) => ({
+    id: lease.id,
+    client: lease.client,
+    pid: lease.pid,
+    transport: lease.transport,
+    attachedAt: lease.attachedAt,
+    lastHeartbeatAt: lease.lastHeartbeatAt,
+    expiresAt: new Date(lease.expiresAt).toISOString(),
+    socketBound: lease.socketBound,
+  }));
+}
+
+function releaseConnectionLeases(state: AppState, context: ConnectionContext): void {
+  if (context.leaseIds.size === 0) {
+    return;
+  }
+  for (const leaseId of context.leaseIds) {
+    state.leases.delete(leaseId);
+  }
+  context.leaseIds.clear();
+  state.lastActivityAt = Date.now();
+}
+
+function sweepExpiredLeases(state: AppState): void {
+  const now = Date.now();
+  for (const [leaseId, lease] of state.leases) {
+    if (lease.expiresAt <= now) {
+      state.leases.delete(leaseId);
+    }
+  }
+}
+
+function readLeaseTtlMs(state: AppState, value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : state.leaseTtlMs;
+}
+
 async function acquireDaemonLock(state: AppState): Promise<void> {
   const path = daemonLockPath(state);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -466,15 +589,21 @@ async function acquireDaemonLock(state: AppState): Promise<void> {
 
 function startIdleTimer(state: AppState, server: net.Server, markStopping: () => void): NodeJS.Timeout {
   const timer = setInterval(() => {
-    const idleFor = Date.now() - state.lastRequestAt;
+    sweepExpiredLeases(state);
+    const idleFor = Date.now() - state.lastActivityAt;
     const writer = state.writer.snapshot();
     if (
       !state.stopping &&
       idleFor >= state.idleTimeoutMs &&
+      idleFor >= state.idleGraceMs &&
+      state.leases.size === 0 &&
+      state.activeRequests === 0 &&
       writer.pending === 0 &&
       writer.running === null &&
-      state.indexTimers.size === 0
+      state.indexTimers.size === 0 &&
+      state.indexInFlight.size === 0
     ) {
+      state.lastShutdownReason = "idle_timeout";
       void stopServer(state, server, markStopping);
     }
   }, Math.min(Math.max(state.idleTimeoutMs, 1000), 60_000));

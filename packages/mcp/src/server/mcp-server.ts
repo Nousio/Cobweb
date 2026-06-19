@@ -1,9 +1,13 @@
-import { CobwebError } from "@cobweb/core";
 import type { DaemonMethods } from "@cobweb/daemon";
-import { callDaemon } from "@cobweb/daemon/client";
+import { ensureDaemonRunning } from "@cobweb/daemon";
+import { callDaemon, openDaemonLease, type DaemonLeaseHandle } from "@cobweb/daemon/client";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+
+const MCP_LEASE_TTL_MS = 30_000;
+const MCP_LEASE_HEARTBEAT_MS = 10_000;
+const MCP_LEASE_DETACH_TIMEOUT_MS = 1_000;
 
 type ToolName = keyof Pick<
   DaemonMethods,
@@ -110,10 +114,12 @@ export const mcpTools: Array<{ name: ToolName; description: string; inputSchema:
 ];
 
 export async function runMcpServer(): Promise<void> {
+  const lease = await attachMcpRuntimeLease();
+  const cleanupLease = registerMcpLeaseCleanup(lease);
   const server = new Server(
     {
       name: "cobweb",
-      version: "0.2.0",
+      version: "0.4.0",
     },
     {
       capabilities: {
@@ -141,7 +147,89 @@ export async function runMcpServer(): Promise<void> {
     };
   });
 
-  await server.connect(new StdioServerTransport());
+  try {
+    await server.connect(new StdioServerTransport());
+  } catch (error) {
+    await cleanupLease();
+    throw error;
+  }
+}
+
+export async function attachMcpRuntimeLease(): Promise<DaemonLeaseHandle> {
+  await ensureDaemonRunning();
+  return openDaemonLease({
+    client: "mcp",
+    pid: process.pid,
+    transport: "stdio",
+    ttlMs: MCP_LEASE_TTL_MS,
+  });
+}
+
+export function registerMcpLeaseCleanup(lease: DaemonLeaseHandle, detachTimeoutMs = MCP_LEASE_DETACH_TIMEOUT_MS): () => Promise<void> {
+  const heartbeat = setInterval(() => {
+    void lease.heartbeat().catch(() => {
+      // The next tool call will surface daemon availability; lease TTL protects cleanup.
+    });
+  }, MCP_LEASE_HEARTBEAT_MS);
+  heartbeat.unref();
+
+  let cleaned = false;
+  const cleanup = async () => {
+    if (cleaned) {
+      return;
+    }
+    cleaned = true;
+    clearInterval(heartbeat);
+    process.stdin.off("close", onStdinClose);
+    process.stdin.off("end", onStdinEnd);
+    process.off("SIGINT", onSigint);
+    process.off("SIGTERM", onSigterm);
+    await detachLeaseBestEffort(lease, detachTimeoutMs);
+  };
+
+  const onStdinClose = () => {
+    void cleanup();
+  };
+  const onStdinEnd = () => {
+    void cleanup();
+  };
+  const onSigint = () => {
+    void cleanup().finally(() => {
+      process.exit(130);
+    });
+  };
+  const onSigterm = () => {
+    void cleanup().finally(() => {
+      process.exit(143);
+    });
+  };
+
+  process.stdin.once("close", onStdinClose);
+  process.stdin.once("end", onStdinEnd);
+  process.once("SIGINT", onSigint);
+  process.once("SIGTERM", onSigterm);
+
+  return cleanup;
+}
+
+async function detachLeaseBestEffort(lease: DaemonLeaseHandle, timeoutMs: number): Promise<void> {
+  let timeout: NodeJS.Timeout | undefined;
+  const detach = lease.detach().catch(() => {
+    lease.close();
+  });
+  const timeoutFallback = new Promise<void>((resolve) => {
+    timeout = setTimeout(() => {
+      // The control socket is lease-bound, so closing it is enough for daemon-side cleanup.
+      lease.close();
+      resolve();
+    }, timeoutMs);
+    timeout.unref();
+  });
+
+  await Promise.race([detach, timeoutFallback]);
+  if (timeout) {
+    clearTimeout(timeout);
+  }
 }
 
 export async function dispatchMcpTool(name: ToolName, args: unknown): Promise<unknown> {
@@ -169,23 +257,7 @@ async function callDaemonForMcp<K extends keyof DaemonMethods>(
   method: K,
   params: DaemonMethods[K]["params"],
 ): Promise<DaemonMethods[K]["result"]> {
-  try {
-    return await callDaemon(method, params);
-  } catch (error) {
-    if (error instanceof CobwebError && error.code === "DAEMON_UNAVAILABLE") {
-      throw new CobwebError(
-        error.code,
-        [
-          "Cobweb daemon is not reachable.",
-          "Start it with `cobweb daemon start`, then retry the MCP request.",
-          "If the daemon was installed globally, confirm `cobwebd` is on PATH and the MCP client uses the same COBWEB_DATA_DIR.",
-          `Cause: ${error.message}`,
-        ].join(" "),
-        { retryable: true, cause: error },
-      );
-    }
-    throw error;
-  }
+  return callDaemon(method, params);
 }
 
 function expectArgs<T>(value: unknown): T {
