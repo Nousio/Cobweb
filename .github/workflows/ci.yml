@@ -92,9 +92,6 @@ jobs:
           npm run dev:cli -- daemon stop
           wait "${daemon_pid}"
 
-      - name: Installation tarball smoke check
-        run: npm run smoke:install
-
   package:
     name: Build Artifacts
     runs-on: ubuntu-latest

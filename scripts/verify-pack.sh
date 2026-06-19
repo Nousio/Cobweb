@@ -12,6 +12,7 @@ PACKAGES=(core daemon cli mcp cobweb)
 status=0
 
 for pkg in "${PACKAGES[@]}"; do
+  package_name="$(node -p "JSON.parse(require('node:fs').readFileSync('packages/${pkg}/package.json', 'utf8')).name")"
   manifest="$(npm pack --dry-run --json --workspace "packages/${pkg}" 2>/dev/null)"
   offenders="$(
     node -e '
@@ -28,11 +29,11 @@ for pkg in "${PACKAGES[@]}"; do
   )"
 
   if [[ -n "${offenders}" ]]; then
-    echo "FAIL @cobweb/${pkg}: publish set contains dev/test files:" >&2
+    echo "FAIL ${package_name}: publish set contains dev/test files:" >&2
     echo "${offenders}" | sed 's/^/  - /' >&2
     status=1
   else
-    echo "OK   @cobweb/${pkg}: no test/src/dev files in publish set"
+    echo "OK   ${package_name}: no test/src/dev files in publish set"
   fi
 done
 

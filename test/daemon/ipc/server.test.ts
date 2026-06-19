@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createAppState } from "../../../packages/daemon/src/app-state/app-state.js";
-import { callDaemon } from "../../../packages/daemon/src/ipc/client.js";
+import { callDaemon, openDaemonLease } from "../../../packages/daemon/src/ipc/client.js";
 import { type DaemonServer, startIpcServer } from "../../../packages/daemon/src/ipc/server.js";
 
 function sendRaw(socketPath: string, payload: string): Promise<string> {
@@ -795,6 +795,46 @@ describe("daemon IPC", () => {
     const response = JSON.parse(raw);
     expect(response.ok).toBe(false);
     expect(response.error.code).toBe("BAD_JSON");
+  });
+
+  it("keeps runtime leases while the control socket is open", async () => {
+    const lease = await openDaemonLease({ client: "mcp-test", pid: process.pid, transport: "stdio", ttlMs: 1_000 }, socketPath);
+    const statusWithLease = await callDaemon("status", undefined, socketPath);
+    expect(statusWithLease.runtime.activeLeases.some((candidate) => candidate.id === lease.leaseId)).toBe(true);
+
+    lease.close();
+    await delay(25);
+
+    const statusAfterClose = await callDaemon("status", undefined, socketPath);
+    expect(statusAfterClose.runtime.activeLeases.some((candidate) => candidate.id === lease.leaseId)).toBe(false);
+  });
+
+  it("does not idle-stop while a runtime lease is active", async () => {
+    const leaseDir = await mkdtemp(join(tmpdir(), "cobweb-lease-"));
+    const leaseSocket = join(leaseDir, "cobwebd.sock");
+    const leaseServer = await startIpcServer(
+      createAppState(
+        {
+          dataDir: leaseDir,
+          dbPath: join(leaseDir, "cobweb.db"),
+          socketPath: leaseSocket,
+          lockPath: join(leaseDir, "lock.yaml"),
+        },
+        { idleTimeoutMs: 20, idleGraceMs: 20, leaseTtlMs: 2_000 },
+      ),
+    );
+    const lease = await openDaemonLease({ client: "mcp-test", pid: process.pid, transport: "stdio", ttlMs: 2_000 }, leaseSocket);
+
+    try {
+      await delay(1_100);
+      await expect(callDaemon("status", undefined, leaseSocket)).resolves.toMatchObject({ running: true });
+      await lease.detach();
+      await delay(1_100);
+      await expect(callDaemon("status", undefined, leaseSocket)).rejects.toThrow(/cobwebd|closed/i);
+    } finally {
+      lease.close();
+      await leaseServer.close();
+    }
   });
 
   it("refuses to start a second daemon on the same socket", async () => {

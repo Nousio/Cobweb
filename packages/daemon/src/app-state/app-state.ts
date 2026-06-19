@@ -51,6 +51,17 @@ export interface IndexInFlightEntry {
   rerunReason: string;
 }
 
+export interface RuntimeLease {
+  id: string;
+  client: string;
+  pid: number | null;
+  transport: string;
+  attachedAt: string;
+  lastHeartbeatAt: string;
+  expiresAt: number;
+  socketBound: boolean;
+}
+
 export interface AppState {
   paths: RuntimePaths;
   db: CobwebDatabase;
@@ -58,8 +69,14 @@ export interface AppState {
   freshness: "fresh" | "rebuilding" | "degraded";
   lastError: string | null;
   lastRequestAt: number;
+  lastActivityAt: number;
   idleTimeoutMs: number;
+  idleGraceMs: number;
+  leaseTtlMs: number;
+  activeRequests: number;
+  lastShutdownReason: string | null;
   maxStalenessMs: number;
+  leases: Map<string, RuntimeLease>;
   watchers: Map<string, FSWatcher>;
   watchRoots: Set<string>;
   indexedRoots: Set<string>;
@@ -71,16 +88,26 @@ export interface AppState {
   stopping: boolean;
 }
 
-export function createAppState(paths = defaultRuntimePaths(), options: { idleTimeoutMs?: number } = {}): AppState {
+export function createAppState(
+  paths = defaultRuntimePaths(),
+  options: { idleTimeoutMs?: number; idleGraceMs?: number; leaseTtlMs?: number } = {},
+): AppState {
+  const now = Date.now();
   return {
     paths,
     db: new CobwebDatabase(paths.dbPath),
     writer: new WriterQueue(),
     freshness: "fresh",
     lastError: null,
-    lastRequestAt: Date.now(),
+    lastRequestAt: now,
+    lastActivityAt: now,
     idleTimeoutMs: options.idleTimeoutMs ?? Number(process.env.COBWEB_IDLE_TIMEOUT_MS ?? 10 * 60 * 1000),
+    idleGraceMs: options.idleGraceMs ?? readPositiveIntegerEnv("COBWEB_IDLE_GRACE_MS", 30_000),
+    leaseTtlMs: options.leaseTtlMs ?? readPositiveIntegerEnv("COBWEB_LEASE_TTL_MS", 30_000),
+    activeRequests: 0,
+    lastShutdownReason: null,
     maxStalenessMs: readPositiveIntegerEnv("COBWEB_MAX_STALENESS_MS", 2_000),
+    leases: new Map(),
     watchers: new Map(),
     watchRoots: new Set(),
     indexedRoots: new Set(),

@@ -24,6 +24,7 @@ npm pack --workspace packages/mcp --pack-destination "${PACK_DIR}" >/dev/null
 
 mkdir -p "${AGGREGATE_STAGE}/dist"
 cp packages/cobweb/package.json "${AGGREGATE_STAGE}/package.json"
+cp LICENSE "${AGGREGATE_STAGE}/LICENSE"
 cp packages/cobweb/README.md "${AGGREGATE_STAGE}/README.md"
 cp packages/cobweb/dist/* "${AGGREGATE_STAGE}/dist/"
 
