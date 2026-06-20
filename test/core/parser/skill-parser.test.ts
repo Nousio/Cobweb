@@ -242,6 +242,40 @@ icon: ./icon.png
     );
   });
 
+  it("parses a source evidence fixture with external package links", async () => {
+    const parsed = await parseSkillDirectory(resolve(fixturesRoot, "tweetclaw-source-evidence"));
+
+    expect(parsed.name).toBe("tweetclaw-source-evidence");
+    expect(parsed.description).toContain("TweetClaw links");
+    expect(parsed.methodSummaries[0]?.methodName).toBe("when-to-use");
+    expect(parsed.methodSummaries[0]?.requiredTools).toEqual(["openclaw", "web-search"]);
+    expect(parsed.resources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "./references/review-policy.md",
+          isExternal: false,
+          mentionedBy: "markdown-link",
+        }),
+        expect.objectContaining({
+          path: "https://github.com/Xquik-dev/tweetclaw",
+          isExternal: true,
+          mentionedBy: "markdown-link",
+        }),
+        expect.objectContaining({
+          path: "https://registry.npmjs.org/@xquik%2ftweetclaw",
+          isExternal: true,
+          mentionedBy: "markdown-link",
+        }),
+        expect.objectContaining({
+          path: "https://clawhub.ai/plugins/@xquik/tweetclaw",
+          isExternal: true,
+          mentionedBy: "markdown-link",
+        }),
+      ]),
+    );
+    expect(parsed.warnings).toHaveLength(0);
+  });
+
   it("records standard resource directories without indexing Codex sidecars", async () => {
     const parsed = await parseSkillDirectory(resolve(fixturesRoot, "agentskills-standard-resources"));
 
