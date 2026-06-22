@@ -36,7 +36,6 @@ Tests and release verification never ship to users. The following are dev/CI-onl
 - `test/**/*.test.ts` — unit and integration tests, centralized under the root `test` directory.
 - `test/fixtures/skills` — parser compatibility fixtures for the agentskills.io / Agent Skills format.
 - `vitest.config.ts` — test runner configuration.
-- `scripts/` — release packaging (`pack-release.sh`) and the publish guard (`verify-pack.sh`).
 - `.github/` and `examples/skills` — CI workflows and smoke fixtures.
 
 Two layers keep them out of the published artifact: tests live outside every package `src` tree, and each package `package.json` uses a `files` allowlist that ships only `dist/**` (plus the aggregate `README.md`).
@@ -47,13 +46,8 @@ Index lifecycle tests should cover both daemon behavior and core storage primiti
 
 Runtime lifecycle changes should preserve the single-owner daemon model. MCP may start or reconnect to the daemon at session startup, but tool calls should forward through the daemon client; lease, active request, writer, and index in-flight state must all block idle shutdown.
 
-Run the publish guard to assert no test, `src`, or dev-only file would be published:
-
-```bash
-npm run build        # produce dist for each package
-npm run verify:pack  # fail if any package would ship test/src/dev files
-```
+Release packaging, publish-set verification, and the npm publish are maintainer tasks. They run from local release scripts kept outside this repository, so they are not part of the contributor workflow and are not needed to build, test, or run Cobweb locally.
 
 ## Continuous Integration
 
-`.github/workflows/ci.yml` runs the typecheck, the publish guard, the test suite, and CLI and daemon smoke checks on every PR. Pushes to `main` also pack the release tarballs.
+`.github/workflows/ci.yml` runs the typecheck, the test suite, and CLI and daemon smoke checks on every PR.
