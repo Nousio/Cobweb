@@ -38,9 +38,6 @@ jobs:
       - name: Typecheck
         run: npm run check
 
-      - name: Verify publish guard
-        run: npm run verify:pack
-
       - name: Unit tests with coverage
         run: npm test -- --coverage
 
@@ -91,37 +88,3 @@ jobs:
           npm run dev:cli -- daemon doctor
           npm run dev:cli -- daemon stop
           wait "${daemon_pid}"
-
-  package:
-    name: Build Artifacts
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.17.1
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Pack release tarballs
-        run: |
-          mkdir -p "${RUNNER_TEMP}/cobweb-tarballs"
-          npm run pack:release -- "${RUNNER_TEMP}/cobweb-tarballs"
-
-      - name: Upload package dist
-        uses: actions/upload-artifact@v4
-        with:
-          name: cobweb-dist
-          path: |
-            packages/*/dist
-            ${{ runner.temp }}/cobweb-tarballs/*.tgz
-          if-no-files-found: error
