@@ -95,12 +95,14 @@ export function evaluateRoutingGuidance(
   workItem?: RoutingWorkItem,
   options: RoutingGuidanceOptions = {},
 ): RoutingGuidance | null {
-  const reason = detectGuidanceReason(query, candidates, workItem);
-  if (!reason) {
+  const reasons = detectGuidanceReasons(query, candidates, workItem);
+  if (reasons.length === 0) {
     return null;
   }
+  const [reason, ...secondaryReasons] = reasons;
   return {
     reason,
+    ...(secondaryReasons.length > 0 ? { secondaryReasons } : {}),
     expects: [...EXPECTED_DIMENSIONS],
     checklist: CHECKLIST_BY_REASON[reason],
     inspectionTargets: inspectionTargets(candidates, options),
@@ -129,17 +131,17 @@ function inspectionTargets(candidates: SkillSearchCandidate[], options: RoutingG
   }));
 }
 
-function detectGuidanceReason(
+function detectGuidanceReasons(
   query: string,
   candidates: SkillSearchCandidate[],
   workItem?: RoutingWorkItem,
-): RoutingGuidanceReason | null {
+): RoutingGuidanceReason[] {
   if (!workItem || typeof workItem.subject !== "string" || !workItem.subject.trim()) {
-    return "missing_work_item";
+    return ["missing_work_item"];
   }
 
   if (candidates.length === 0) {
-    return "no_candidate";
+    return ["no_candidate"];
   }
 
   const top1 = candidates[0].score;
@@ -147,22 +149,23 @@ function detectGuidanceReason(
     candidates.length >= 2 && top1 - candidates[1].score < ROUTING_GUIDANCE_THRESHOLDS.minTop1Gap;
   const confident = top1 >= ROUTING_GUIDANCE_THRESHOLDS.minTop1Score && !gapSmall;
   if (confident) {
-    return null;
+    return [];
   }
+  const candidateQualityReasons: RoutingGuidanceReason[] = [
+    ...(top1 < ROUTING_GUIDANCE_THRESHOLDS.minTop1Score ? ["top1_confidence_low" as const] : []),
+    ...(gapSmall ? ["top1_gap_small" as const] : []),
+  ];
 
   // Not confident: prefer the most actionable reason. Query-shape problems come
   // first because fixing the query is more effective than re-ranking.
   const subjectTokens = discriminativeTokens(workItem.subject);
   if (subjectTokens.length === 0) {
-    return "missing_subject";
+    return ["missing_subject", ...candidateQualityReasons];
   }
   if (discriminativeTokens(query).length > ROUTING_GUIDANCE_THRESHOLDS.maxQueryTokens) {
-    return "query_too_long";
+    return ["query_too_long", ...candidateQualityReasons];
   }
-  if (top1 < ROUTING_GUIDANCE_THRESHOLDS.minTop1Score) {
-    return "top1_confidence_low";
-  }
-  return "top1_gap_small";
+  return candidateQualityReasons;
 }
 
 export function discriminativeTokens(query: string): string[] {

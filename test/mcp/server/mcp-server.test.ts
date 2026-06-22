@@ -53,6 +53,8 @@ describe("MCP server tool dispatch", () => {
     const tool = mcpTools.find((candidate) => candidate.name === "skill_select");
     expect(tool?.description).toMatch(/intent verb/);
     expect(tool?.description).toMatch(/workItem\.subject/);
+    expect(tool?.description).toMatch(/selectionStatus/);
+    expect(tool?.description).toMatch(/needs_inspection/);
     expect(tool?.description).toMatch(/guidance/);
     expect(tool?.description).toMatch(/inspectionTargets/);
     const schema = tool?.inputSchema as {

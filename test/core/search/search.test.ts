@@ -85,6 +85,43 @@ describe("rankSkillCandidate", () => {
 
     expect(result.scoreBreakdown.find((item) => item.signal === "content_match")?.contribution).toBeGreaterThan(0);
   });
+
+  it("downweights frequent query tokens through caller-provided token weights", () => {
+    const strong = rankSkillCandidate({
+      query: "configure CLI status line prompt footer status bar",
+      name: "update-cli-config",
+      description: "View and modify Cursor CLI configuration settings.",
+      methods: [],
+      matchReasons: [{ field: "name", signal: "fts_match" }],
+      bm25Rank: -1,
+    });
+    const weighted = rankSkillCandidate({
+      query: "configure CLI status line prompt footer status bar",
+      name: "update-cli-config",
+      description: "View and modify Cursor CLI configuration settings.",
+      methods: [],
+      matchReasons: [{ field: "name", signal: "fts_match" }],
+      bm25Rank: -1,
+      tokenWeights: { cli: 0.2 },
+    });
+
+    expect(weighted.scoreBreakdown.find((item) => item.signal === "name")?.score).toBeLessThan(
+      strong.scoreBreakdown.find((item) => item.signal === "name")?.score ?? 0,
+    );
+  });
+
+  it("gives a small quality signal to candidates with descriptions", () => {
+    const result = rankSkillCandidate({
+      query: "snapshot DTO transform",
+      name: "direct-transform-first",
+      description: "Choose the shortest safe transformation path.",
+      methods: [],
+      matchReasons: [{ field: "description", signal: "fts_match" }],
+      bm25Rank: -1,
+    });
+
+    expect(result.scoreBreakdown.find((item) => item.signal === "description_quality")?.contribution).toBeGreaterThan(0);
+  });
 });
 
 describe("evaluateRoutingGuidance", () => {
@@ -168,6 +205,15 @@ describe("evaluateRoutingGuidance", () => {
       candidate("second", 0.48),
     ], workItem);
     expect(guidance?.reason).toBe("top1_gap_small");
+  });
+
+  it("preserves secondary reasons when low confidence candidates are also close", () => {
+    const guidance = evaluateRoutingGuidance("websocket reconnect hang", [
+      candidate("first", 0.2),
+      candidate("second", 0.18),
+    ], workItem);
+    expect(guidance?.reason).toBe("top1_confidence_low");
+    expect(guidance?.secondaryReasons).toContain("top1_gap_small");
   });
 
   it("does not flag a single strong candidate as gap_small", () => {

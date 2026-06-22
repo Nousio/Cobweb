@@ -114,7 +114,7 @@ Once connected, the agent can call these tools. Each takes a directory `path` (a
 | Tool | Description |
 | --- | --- |
 | `skill_search` | Full-text search across indexed skills, returning candidates with the reasons each one matched. |
-| `skill_select` | Pick the best skill for an analyzed routing query, with a deterministic score breakdown and SkillGraph chain context. Returns `guidance` when the input is ambiguous or confidence is low. |
+| `skill_select` | Pick the best skill for an analyzed routing query, with a deterministic score breakdown and SkillGraph chain context. Returns `selectionStatus`; low-confidence results are tentative and include `guidance` plus inspection targets. |
 | `skill_context` | Return a skill's methods, resources, policy, and lint context. |
 | `skill_graph` | Build an in-memory, read-only SkillGraph topology from a scan root. |
 | `skill_chain` | Return one skill's root-to-skill path, references, and resources within the graph. |

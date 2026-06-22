@@ -125,7 +125,7 @@ cobweb lint ./demo-skills/review-pr
 | 工具 | 说明 |
 | --- | --- |
 | `skill_search` | 在已索引的 skill 上做全文搜索，返回候选项及每条命中的匹配理由。 |
-| `skill_select` | 针对已分析的路由查询选出最合适的 skill，给出确定性分数明细和 SkillGraph 链路上下文；当输入含糊或置信度低时返回 `guidance`（及待核查目标）。 |
+| `skill_select` | 针对已分析的路由查询选出最合适的 skill，给出确定性分数明细和 SkillGraph 链路上下文；返回 `selectionStatus`，低置信结果仅为暂定候选，并附带 `guidance` 和待核查目标。 |
 | `skill_context` | 返回某个 skill 的方法、资源、policy 和 lint 上下文——选定 skill 后、动手前应调用它。 |
 | `skill_graph` | 从扫描根构建内存中的只读 SkillGraph 拓扑（扫描根、skill、资源、引用）。 |
 | `skill_chain` | 在图中返回某个 skill 的根到 skill 路径、出/入引用以及其引用的资源。 |
