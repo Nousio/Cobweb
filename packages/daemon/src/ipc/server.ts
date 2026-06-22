@@ -1,4 +1,4 @@
-import type { RoutingWorkItem, SkillSearchCandidate, SkillSearchResult } from "@cobweb/core";
+import type { RoutingGuidance, RoutingWorkItem, SkillSearchCandidate, SkillSearchResult, SkillSelectionStatus } from "@cobweb/core";
 import {
   applyProjectionPlan,
   applyVendorPlan,
@@ -421,14 +421,16 @@ async function dispatch(state: AppState, request: JsonRpcRequest, context: Conne
       const guidance = evaluateRoutingGuidance(params.query, search.candidates, params.workItem, {
         inspectionFallbackPaths: [root],
       });
+      const selectionStatus = selectionStatusFor(selected, guidance);
       return {
         query: params.query,
         freshness: search.freshness,
+        selectionStatus,
         selected,
         chain,
         recommendation: selected
           ? {
-            reason: selectionReason(selected),
+            reason: selectionReason(selected, guidance),
             confidence: selected.score,
           }
           : {
@@ -493,7 +495,14 @@ async function dispatch(state: AppState, request: JsonRpcRequest, context: Conne
   }
 }
 
-function selectionReason(selected: SkillSearchCandidate): string {
+function selectionStatusFor(selected: SkillSearchCandidate | null, guidance: RoutingGuidance | null): SkillSelectionStatus {
+  if (!selected) {
+    return "no_candidate";
+  }
+  return guidance ? "needs_inspection" : "confident";
+}
+
+function selectionReason(selected: SkillSearchCandidate, guidance: RoutingGuidance | null): string {
   const strongest = [...selected.scoreBreakdown]
     .sort((left, right) => right.contribution - left.contribution)
     .filter((item) => item.contribution > 0)
@@ -501,6 +510,10 @@ function selectionReason(selected: SkillSearchCandidate): string {
     .map((item) => item.signal.replace(/_/g, " "));
   if (strongest.length === 0) {
     return `Selected ${selected.name} as the highest ranked indexed skill.`;
+  }
+  if (guidance) {
+    const reasons = [guidance.reason, ...(guidance.secondaryReasons ?? [])].join(", ");
+    return `Tentatively ranked ${selected.name} first because it matched ${strongest.join(", ")}, but selection needs inspection (${reasons}). Inspect guidance.inspectionTargets or call skill_context before using it.`;
   }
   return `Selected ${selected.name} because it matched ${strongest.join(", ")}.`;
 }

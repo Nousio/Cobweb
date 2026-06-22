@@ -546,6 +546,7 @@ describe("daemon IPC", () => {
     expect(result.selected?.name).toBe("review");
     expect(result.selected?.scoreBreakdown.length).toBeGreaterThan(0);
     expect(result.chain?.target.name).toBe("review");
+    expect(result.selectionStatus).toBe("needs_inspection");
     expect(result.recommendation.confidence).toBeGreaterThan(0);
     expect(result.guidance?.reason).toBe("missing_work_item");
   });
@@ -557,7 +558,9 @@ describe("daemon IPC", () => {
       workItem: { subject: "pull request" },
     }, socketPath);
     expect(result.selected?.name).toBe("review");
+    expect(result.selectionStatus).toBe("needs_inspection");
     expect(result.recommendation.confidence).toBeGreaterThan(0);
+    expect(result.recommendation.reason).toMatch(/Tentatively ranked/);
     expect(result.rejected).toEqual([]);
     expect(result.chain?.target.name).toBe("review");
     expect(["query_too_long", "top1_confidence_low"]).toContain(result.guidance?.reason);
@@ -575,6 +578,7 @@ describe("daemon IPC", () => {
       workItem: { subject: "unknown daemon issue" },
     }, socketPath);
     expect(result.selected).toBeNull();
+    expect(result.selectionStatus).toBe("no_candidate");
     expect(result.recommendation.confidence).toBe(0);
     expect(result.guidance?.reason).toBe("no_candidate");
     expect(Array.isArray(result.guidance?.checklist)).toBe(true);

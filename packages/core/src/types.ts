@@ -131,6 +131,7 @@ export interface RoutingInspectionTarget {
 
 export interface RoutingGuidance {
   reason: RoutingGuidanceReason;
+  secondaryReasons?: RoutingGuidanceReason[];
   expects: string[];
   checklist: string[];
   inspectionTargets: RoutingInspectionTarget[];
@@ -141,9 +142,12 @@ export interface RoutingGuidance {
   };
 }
 
+export type SkillSelectionStatus = "confident" | "needs_inspection" | "no_candidate";
+
 export interface SkillSelectResult {
   query: string;
   freshness: IndexFreshness;
+  selectionStatus: SkillSelectionStatus;
   selected: SkillSearchCandidate | null;
   chain?: SkillGraphChain | null;
   recommendation: {

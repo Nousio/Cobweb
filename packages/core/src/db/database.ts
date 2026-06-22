@@ -6,7 +6,8 @@ import { readCobwebLockfile } from "../canonical/lockfile.js";
 import { jaccardSimilarity, tokenizeText } from "../dedup/similarity.js";
 import { sha256 } from "../hash.js";
 import { parseSkillDirectory } from "../parser/skill-parser.js";
-import { rankSkillCandidate } from "../search/rank.js";
+import { rankSkillCandidate, type TokenSignalWeights } from "../search/rank.js";
+import { discriminativeTokens } from "../search/routing-guidance.js";
 import { segmentText, tokenizeSearchText } from "../search/segment.js";
 import type {
   DuplicateCandidate,
@@ -67,6 +68,11 @@ interface SearchRow {
   body_snippet: string | null;
   headings_snippet: string | null;
   method_snippet: string | null;
+  indexed_name: string;
+  indexed_description: string;
+  indexed_body: string;
+  indexed_headings: string;
+  indexed_method_summary: string;
 }
 
 export class CobwebDatabase {
@@ -279,7 +285,12 @@ export class CobwebDatabase {
           snippet(skill_search_fts, 2, '[', ']', '...', 12) AS description_snippet,
           snippet(skill_search_fts, 3, '[', ']', '...', 12) AS body_snippet,
           snippet(skill_search_fts, 4, '[', ']', '...', 12) AS headings_snippet,
-          snippet(skill_search_fts, 5, '[', ']', '...', 12) AS method_snippet
+          snippet(skill_search_fts, 5, '[', ']', '...', 12) AS method_snippet,
+          skill_search_fts.name AS indexed_name,
+          skill_search_fts.description AS indexed_description,
+          skill_search_fts.body AS indexed_body,
+          skill_search_fts.headings AS indexed_headings,
+          skill_search_fts.method_summary AS indexed_method_summary
         FROM skill_search_fts
         JOIN skills s ON s.id = skill_search_fts.skill_id
         WHERE skill_search_fts MATCH ?
@@ -288,6 +299,7 @@ export class CobwebDatabase {
         LIMIT ?`,
       )
       .all(...queryParams) as unknown as SearchRow[];
+    const tokenWeights = tokenWeightsForRows(query, rows);
 
     return rows.map((row) => {
       const matchReasons = matchReasonsForRow(row);
@@ -299,6 +311,7 @@ export class CobwebDatabase {
         methods,
         matchReasons,
         bm25Rank: row.rank,
+        tokenWeights,
       });
       return {
         path: row.root_path,
@@ -682,6 +695,58 @@ function toFtsQuery(input: string): string {
   return Array.from(new Set(terms))
     .map((term) => `"${term.replace(/"/g, '""')}"`)
     .join(" OR ");
+}
+
+function tokenWeightsForRows(query: string, rows: SearchRow[]): TokenSignalWeights {
+  const queryTokens = discriminativeTokens(query);
+  if (queryTokens.length === 0 || rows.length <= 1) {
+    return {};
+  }
+
+  const queryCounts = queryTokenCounts(query);
+  const documentFrequency = new Map(queryTokens.map((token) => [token, 0]));
+  for (const row of rows) {
+    const tokens = new Set(tokenizeSearchText(indexedRowText(row)));
+    for (const token of queryTokens) {
+      if (tokens.has(token)) {
+        documentFrequency.set(token, (documentFrequency.get(token) ?? 0) + 1);
+      }
+    }
+  }
+
+  const maxRarity = Math.log(rows.length + 1);
+  return Object.fromEntries(queryTokens.map((token) => {
+    const frequency = documentFrequency.get(token) ?? 0;
+    const rarity = maxRarity > 0 ? Math.log((rows.length + 1) / (frequency + 1)) / maxRarity : 1;
+    const queryPenalty = 1 / Math.sqrt(queryCounts.get(token) ?? 1);
+    return [token, Number(clamp((0.35 + 0.65 * rarity) * queryPenalty, 0.2, 1).toFixed(3))];
+  }));
+}
+
+function queryTokenCounts(input: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const token of segmentText(input).toLowerCase().split(/[^a-z0-9\u4e00-\u9fff]+/u)) {
+    const normalized = token.trim();
+    if (normalized.length < 2) {
+      continue;
+    }
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function indexedRowText(row: SearchRow): string {
+  return [
+    row.indexed_name,
+    row.indexed_description,
+    row.indexed_body,
+    row.indexed_headings,
+    row.indexed_method_summary,
+  ].join("\n");
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function matchReasonsForRow(row: SearchRow): SearchMatchReason[] {
