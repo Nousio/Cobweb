@@ -90,7 +90,7 @@ What each part means:
 | `cobweb-mcp` | The binary to launch inside that package — this is the MCP server (not the CLI). |
 | `--path /Users/you/skills` | The skill directory this MCP server should serve by default. |
 
-> Want a fixed version instead of always-latest? Pin it: `"--package", "opencobweb@0.4.1"`. The `@0.4.1` part means version `0.4.1`.
+> Want a fixed version instead of always-latest? Pin it: `"--package", "opencobweb@0.4.2"`. The `@0.4.2` part means version `0.4.2`.
 
 ### 3. Restart the client and confirm the tools appear
 

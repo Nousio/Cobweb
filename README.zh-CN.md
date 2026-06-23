@@ -92,7 +92,7 @@ node --version
 | `--path /Users/you/skills` | 指定这个 MCP server 默认服务的 skill 目录。       |
 
 
-> 如果想固定版本而不是每次拉最新，把参数写成 `"--package", "opencobweb@0.4.1"` 即可，@0.4.1 代表 0.4.1 版本。
+> 如果想固定版本而不是每次拉最新，把参数写成 `"--package", "opencobweb@0.4.2"` 即可，@0.4.2 代表 0.4.2 版本。
 
 ### 3. 重启客户端，确认工具出现
 

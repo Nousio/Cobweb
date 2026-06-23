@@ -1,6 +1,6 @@
 {
   "name": "@cobweb/daemon",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "type": "module",
   "license": "AGPL-3.0-only",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "cobwebd": "./dist/index.js"
   },
   "dependencies": {
-    "@cobweb/core": "0.4.1",
+    "@cobweb/core": "0.4.2",
     "chokidar": "^5.0.0"
   },
   "scripts": {

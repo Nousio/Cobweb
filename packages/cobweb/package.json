@@ -1,6 +1,6 @@
 {
   "name": "opencobweb",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "type": "module",
   "license": "AGPL-3.0-only",
   "description": "openCobweb MCP server package for working with local Agent Skills.",
@@ -27,10 +27,10 @@
     "@cobweb/mcp"
   ],
   "dependencies": {
-    "@cobweb/core": "0.4.1",
-    "@cobweb/daemon": "0.4.1",
-    "@cobweb/cli": "0.4.1",
-    "@cobweb/mcp": "0.4.1"
+    "@cobweb/core": "0.4.2",
+    "@cobweb/daemon": "0.4.2",
+    "@cobweb/cli": "0.4.2",
+    "@cobweb/mcp": "0.4.2"
   },
   "scripts": {
     "build": "tsc -b",

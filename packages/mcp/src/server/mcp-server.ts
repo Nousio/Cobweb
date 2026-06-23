@@ -153,7 +153,7 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<void
   const server = new Server(
     {
       name: "cobweb",
-      version: "0.4.1",
+      version: "0.4.2",
     },
     {
       capabilities: {
