@@ -76,7 +76,7 @@ export const mcpTools: Array<{ name: ToolName; description: string; inputSchema:
   {
     name: "skill_select",
     description:
-      "Select the best indexed skill for a query with deterministic score breakdown and SkillGraph chain context. Before calling, analyze the user's task and provide `workItem.subject` for the concrete thing being handled; this is required so Cobweb can distinguish raw user text from an agent-analyzed routing request. Pass `query` as analyzed routing terms (intent verb + discriminative subject + optional constraints), NOT the raw user sentence; for a multi-step task (e.g. implement, then review, then trace logic) call this once per step. The result includes `selectionStatus`: use `selected` directly only when it is `confident`; when it is `needs_inspection`, treat `selected` as a tentative top-ranked candidate and inspect `guidance.inspectionTargets` or call `skill_context` before using it; when it is `no_candidate`, inspect the scan root or refine the query. The result may include a `guidance` object when workItem is missing, input quality is low, candidate confidence is low, or top candidates are close (reason one of missing_work_item | no_candidate | query_too_long | missing_subject | top1_confidence_low | top1_gap_small, with optional secondaryReasons): follow its `checklist` to re-analyze the task and call again. After a confident selection, call `skill_context` for the chosen skill to get its methods, policy, and resources.",
+      "Select the best indexed skill for a query with deterministic score breakdown and SkillGraph chain context. Before calling, analyze the user's task and provide `workItem.subject` for the concrete thing being handled; this is required so Cobweb can distinguish raw user text from an agent-analyzed routing request, and `subject` now also feeds ranking (candidates covering the core object rank higher), so set it to the real task object, not filler. Pass `query` as analyzed routing terms (intent verb + discriminative subject + optional constraints), NOT the raw user sentence; for a multi-step task (e.g. implement, then review, then trace logic) call this once per step. The result includes `selectionStatus`: use `selected` directly only when it is `confident`; when it is `needs_inspection`, treat `selected` as a tentative top-ranked candidate and inspect `guidance.inspectionTargets` or call `skill_context` before using it; when it is `no_candidate`, inspect the scan root or refine the query. The result may include a `guidance` object when workItem is missing, input quality is low, candidate confidence is low, or top candidates are close (reason one of missing_work_item | no_candidate | query_too_long | missing_subject | top1_confidence_low | top1_gap_small, with optional secondaryReasons): follow its `checklist` to re-analyze the task and call again. After a confident selection, call `skill_context` for the chosen skill to get its methods, policy, and resources.",
     inputSchema: {
       type: "object",
       properties: {
@@ -119,7 +119,7 @@ export async function runMcpServer(): Promise<void> {
   const server = new Server(
     {
       name: "cobweb",
-      version: "0.4.0",
+      version: "0.4.1",
     },
     {
       capabilities: {

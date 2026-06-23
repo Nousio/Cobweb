@@ -366,10 +366,14 @@ async function dispatch(state: AppState, request: JsonRpcRequest, context: Conne
       return state.writer.enqueue("VendorResource", async () => applyVendorPlan(plan));
     }
     case "skill_search": {
-      const params = expectParams<{ path: string; query: string; limit?: number }>(request.params);
+      const params = expectParams<{ path: string; query: string; limit?: number; workItem?: RoutingWorkItem }>(request.params);
       const root = resolve(params.path);
       const warnings = await ensureIndexedRoot(state, root);
-      const candidates = state.db.searchSkills(params.query, { limit: params.limit, root });
+      const candidates = state.db.searchSkills(params.query, {
+        limit: params.limit,
+        root,
+        subject: params.workItem?.subject,
+      });
       return {
         query: params.query,
         freshness: rootFreshness(state, root),

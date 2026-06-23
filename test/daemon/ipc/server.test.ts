@@ -571,6 +571,50 @@ describe("daemon IPC", () => {
     });
   });
 
+  it("routes workItem.subject into ranking so the core object wins", async () => {
+    const subjectRoot = await mkdtemp(join(tmpdir(), "cobweb-daemon-subject-"));
+    const rbacSkill = join(subjectRoot, "rbac-policy-audit");
+    const createSkill = join(subjectRoot, "create-skill");
+    await mkdir(rbacSkill, { recursive: true });
+    await mkdir(createSkill, { recursive: true });
+    await writeFile(
+      join(rbacSkill, "SKILL.md"),
+      "---\nname: rbac-policy-audit\ndescription: Audit RBAC role policy bindings.\n---\n\n# Audit\n\nReview policy resources and rbac role bindings.\n",
+    );
+    await writeFile(
+      join(createSkill, "SKILL.md"),
+      "---\nname: create-skill\ndescription: Create Cursor Agent Skills. Use when authoring a new skill or asking about SKILL.md structure.\n---\n\n# Create\n\nAuthor a new skill.\n",
+    );
+
+    const subjectSocket = join(subjectRoot, "cobwebd.sock");
+    const subjectState = createAppState({
+      dataDir: subjectRoot,
+      dbPath: join(subjectRoot, "cobweb.db"),
+      socketPath: subjectSocket,
+      lockPath: join(subjectRoot, "lock.yaml"),
+    });
+    const subjectServer = await startIpcServer(subjectState);
+
+    try {
+      const query = "author new agent skill skill md structure resources policy";
+      const towardsCreate = await callDaemon("skill_select", {
+        path: subjectRoot,
+        query,
+        workItem: { subject: "new agent skill" },
+      }, subjectSocket);
+      expect(towardsCreate.selected?.name).toBe("create-skill");
+
+      const towardsRbac = await callDaemon("skill_select", {
+        path: subjectRoot,
+        query,
+        workItem: { subject: "rbac policy audit" },
+      }, subjectSocket);
+      expect(towardsRbac.selected?.name).toBe("rbac-policy-audit");
+    } finally {
+      await subjectServer.close();
+    }
+  });
+
   it("returns no_candidate guidance when nothing matches", async () => {
     const result = await callDaemon("skill_select", {
       path: skillRoot,

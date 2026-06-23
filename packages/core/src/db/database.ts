@@ -38,6 +38,9 @@ export interface BulkImportOptions {
 export interface SkillSearchOptions {
   limit?: number;
   root?: string;
+  // Agent-declared concrete object of the task (workItem.subject). Feeds the
+  // subject_match ranking signal so the core task object guides selection.
+  subject?: string;
 }
 
 export interface SkillContentHashRecord {
@@ -312,6 +315,7 @@ export class CobwebDatabase {
         matchReasons,
         bm25Rank: row.rank,
         tokenWeights,
+        subject: options.subject,
       });
       return {
         path: row.root_path,

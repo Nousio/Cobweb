@@ -122,6 +122,102 @@ describe("rankSkillCandidate", () => {
 
     expect(result.scoreBreakdown.find((item) => item.signal === "description_quality")?.contribution).toBeGreaterThan(0);
   });
+
+  it("lets workItem.subject break a near tie a constraint token would otherwise win", () => {
+    const query = "author new agent skill skill md structure resources policy";
+    const rbacInput = {
+      query,
+      name: "rbac-policy-audit",
+      description: "Audit RBAC role policy bindings.",
+      methods: [],
+      matchReasons: [
+        { field: "name", signal: "fts_match" } as SearchMatchReason,
+        { field: "description", signal: "fts_match" } as SearchMatchReason,
+      ],
+      bm25Rank: -1,
+    };
+    const createInput = {
+      query,
+      name: "create-skill",
+      description: "Create Cursor Agent Skills. Use when authoring a new skill or asking about SKILL.md structure.",
+      methods: [],
+      matchReasons: [{ field: "description", signal: "fts_match" } as SearchMatchReason],
+      bm25Rank: -1,
+    };
+
+    const rbacWithout = rankSkillCandidate(rbacInput);
+    const createWithout = rankSkillCandidate(createInput);
+    expect(rbacWithout.score).toBeGreaterThan(createWithout.score);
+
+    const subject = "new agent skill";
+    const rbacWith = rankSkillCandidate({ ...rbacInput, subject });
+    const createWith = rankSkillCandidate({ ...createInput, subject });
+    expect(createWith.score).toBeGreaterThan(rbacWith.score);
+    expect(rbacWith.scoreBreakdown.find((item) => item.signal === "subject_match")?.contribution).toBe(0);
+    expect(createWith.scoreBreakdown.find((item) => item.signal === "subject_match")?.contribution).toBeGreaterThan(0);
+  });
+
+  it("rewards a candidate name that preserves an adjacent query phrase", () => {
+    const phrase = rankSkillCandidate({
+      query: "resolve pr comment review feedback",
+      name: "pr-comment-diff-discipline",
+      description: "",
+      methods: [],
+      matchReasons: [{ field: "name", signal: "fts_match" }],
+      bm25Rank: -1,
+    });
+    const noPhrase = rankSkillCandidate({
+      query: "resolve diff review feedback",
+      name: "pr-comment-diff-discipline",
+      description: "",
+      methods: [],
+      matchReasons: [{ field: "name", signal: "fts_match" }],
+      bm25Rank: -1,
+    });
+
+    const phraseContribution = phrase.scoreBreakdown.find((item) => item.signal === "name_phrase")?.contribution ?? 0;
+    const noPhraseContribution = noPhrase.scoreBreakdown.find((item) => item.signal === "name_phrase")?.contribution ?? 0;
+    expect(phraseContribution).toBeGreaterThan(0);
+    expect(phraseContribution).toBeGreaterThan(noPhraseContribution);
+  });
+
+  it("keeps subject_match neutral when no subject is provided", () => {
+    const result = rankSkillCandidate({
+      query: "review pull request",
+      name: "review",
+      description: "Review pull requests before merge",
+      methods: [],
+      matchReasons: [{ field: "name", signal: "fts_match" }],
+      bm25Rank: -1,
+    });
+
+    expect(result.scoreBreakdown.find((item) => item.signal === "subject_match")?.contribution).toBe(0);
+  });
+
+  it("scores subject_match by how much of the subject the candidate covers", () => {
+    const partial = rankSkillCandidate({
+      query: "author new agent skill",
+      subject: "new agent skill",
+      name: "agent",
+      description: "",
+      methods: [],
+      matchReasons: [{ field: "name", signal: "fts_match" }],
+      bm25Rank: -1,
+    });
+    const full = rankSkillCandidate({
+      query: "author new agent skill",
+      subject: "new agent skill",
+      name: "create-skill",
+      description: "Create Cursor Agent Skills. Use when authoring a new skill.",
+      methods: [],
+      matchReasons: [{ field: "description", signal: "fts_match" }],
+      bm25Rank: -1,
+    });
+
+    expect(full.scoreBreakdown.find((item) => item.signal === "subject_match")?.score).toBeGreaterThan(
+      partial.scoreBreakdown.find((item) => item.signal === "subject_match")?.score ?? 0,
+    );
+  });
 });
 
 describe("evaluateRoutingGuidance", () => {

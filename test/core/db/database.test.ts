@@ -88,6 +88,35 @@ describe("CobwebDatabase", () => {
     expect(result[0]?.matchReasons.some((reason) => reason.field === "body" || reason.field === "method")).toBe(true);
   });
 
+  it("lets workItem.subject reorder candidates a constraint token would win", async () => {
+    const db = await tempDb();
+    db.upsertSkill(
+      makeSkill("/skills/rbac-policy-audit", {
+        name: "rbac-policy-audit",
+        description: "Audit RBAC role policy bindings.",
+        body: "# Audit\n\nReview policy resources and rbac role bindings.",
+        contentHash: "rbac",
+      }),
+    );
+    db.upsertSkill(
+      makeSkill("/skills/create-skill", {
+        name: "create-skill",
+        description: "Create Cursor Agent Skills. Use when authoring a new skill or asking about SKILL.md structure.",
+        body: "",
+        contentHash: "create",
+      }),
+    );
+
+    const query = "author new agent skill skill md structure resources policy";
+    const withoutSubject = db.searchSkills(query);
+    expect(withoutSubject[0]?.name).toBe("rbac-policy-audit");
+
+    const withSubject = db.searchSkills(query, { subject: "new agent skill" });
+    expect(withSubject[0]?.name).toBe("create-skill");
+    const subjectSignal = withSubject[0]?.scoreBreakdown.find((item) => item.signal === "subject_match");
+    expect(subjectSignal?.contribution ?? 0).toBeGreaterThan(0);
+  });
+
   it("matches Chinese tasks with CJK bigram augmented FTS", async () => {
     const db = await tempDb();
     db.upsertSkill(
