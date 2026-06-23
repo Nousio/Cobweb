@@ -14,9 +14,10 @@ vi.mock("@cobweb/daemon/client", () => ({
   openDaemonLease: (...args: unknown[]) => openDaemonLease(...args),
 }));
 
-const { attachMcpRuntimeLease, dispatchMcpTool, mcpTools, registerMcpLeaseCleanup } = await import(
+const { attachMcpRuntimeLease, createMcpTools, dispatchMcpTool, mcpTools, registerMcpLeaseCleanup } = await import(
   "../../../packages/mcp/src/server/mcp-server.js"
 );
+const { parseMcpServerOptions, startMcpServerCli } = await import("../../../packages/mcp/src/index.js");
 
 afterEach(() => {
   callDaemon.mockReset();
@@ -47,6 +48,119 @@ describe("MCP server tool dispatch", () => {
     callDaemon.mockResolvedValue({ candidates: [] });
     await dispatchMcpTool("skill_search", { path: "/skills", query: "review", limit: 3 });
     expect(callDaemon).toHaveBeenCalledWith("skill_search", { path: "/skills", query: "review", limit: 3 });
+  });
+
+  it("parses repeated MCP --path options", () => {
+    expect(parseMcpServerOptions(["--path", "/skills/a", "--path=/skills/b"], {})).toEqual({
+      skillRoots: ["/skills/a", "/skills/b"],
+    });
+  });
+
+  it("accepts an array of directories after a single --path", () => {
+    expect(parseMcpServerOptions(["--path", "/skills/a", "/skills/b"], {})).toEqual({
+      skillRoots: ["/skills/a", "/skills/b"],
+    });
+  });
+
+  it("rejects an empty or whitespace --path value", () => {
+    expect(() => parseMcpServerOptions(["--path", ""], {})).toThrow(/non-empty directory/);
+    expect(() => parseMcpServerOptions(["--path", "   "], {})).toThrow(/non-empty directory/);
+    expect(() => parseMcpServerOptions(["--path", "/skills/a", ""], {})).toThrow(/non-empty directory/);
+    expect(() => parseMcpServerOptions(["--path="], {})).toThrow(/non-empty directory/);
+    expect(() => parseMcpServerOptions(["--path=   "], {})).toThrow(/non-empty directory/);
+  });
+
+  it("rejects --path with no directory value", () => {
+    expect(() => parseMcpServerOptions(["--path"], {})).toThrow(/requires a directory value/);
+    expect(() => parseMcpServerOptions(["--path", "--path=/skills"], {})).toThrow(/requires a directory value/);
+  });
+
+  it("fails fast without starting the server on an invalid --path", async () => {
+    const previousExitCode = process.exitCode;
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    try {
+      await startMcpServerCli(["--path", ""], {});
+      expect(process.exitCode).toBe(1);
+      expect(ensureDaemonRunning).not.toHaveBeenCalled();
+      expect(stderr).toHaveBeenCalledWith(expect.stringContaining("non-empty directory"));
+    } finally {
+      stderr.mockRestore();
+      process.exitCode = previousExitCode;
+    }
+  });
+
+  it("makes path optional for configured scan roots", () => {
+    const tool = createMcpTools({ skillRoots: ["/skills"] }).find((candidate) => candidate.name === "skill_search");
+    expect((tool?.inputSchema as { required?: string[] }).required).toEqual(["query"]);
+  });
+
+  it("uses configured single path when tool path is omitted", async () => {
+    callDaemon.mockResolvedValue({ candidates: [] });
+    await dispatchMcpTool("skill_search", { query: "review" }, { skillRoots: ["/configured-skills"] });
+    expect(callDaemon).toHaveBeenCalledWith("skill_search", { query: "review", path: "/configured-skills" });
+  });
+
+  it("merges search results across configured paths", async () => {
+    callDaemon.mockImplementation(async (_method: string, params: { path: string }) => ({
+      query: "review",
+      freshness: params.path.endsWith("a") ? "fresh" : "rebuilding",
+      candidates: [
+        {
+          path: `${params.path}/skill`,
+          name: params.path.endsWith("a") ? "a" : "b",
+          description: "",
+          duplicateOf: null,
+          warnings: [],
+          score: params.path.endsWith("a") ? 0.5 : 0.9,
+          scoreBreakdown: [],
+          matchReasons: [],
+          methods: [],
+        },
+      ],
+      warnings: [`${params.path}: warning`],
+    }));
+
+    await expect(dispatchMcpTool("skill_search", { query: "review", limit: 1 }, { skillRoots: ["/skills/a", "/skills/b"] })).resolves.toMatchObject({
+      freshness: "rebuilding",
+      candidates: [{ name: "b" }],
+      warnings: ["/skills/a: warning", "/skills/b: warning"],
+    });
+    expect(callDaemon).toHaveBeenCalledTimes(2);
+  });
+
+  it("selects the highest scoring skill across configured paths", async () => {
+    callDaemon.mockImplementation(async (_method: string, params: { path: string }) => {
+      const score = params.path.endsWith("a") ? 0.5 : 0.9;
+      const candidate = {
+        path: `${params.path}/skill`,
+        name: params.path.endsWith("a") ? "a" : "b",
+        description: "",
+        duplicateOf: null,
+        warnings: [],
+        score,
+        scoreBreakdown: [],
+        matchReasons: [],
+        methods: [],
+      };
+      return {
+        query: "review",
+        freshness: "fresh",
+        selectionStatus: "confident",
+        selected: candidate,
+        chain: null,
+        recommendation: { reason: "selected", confidence: score },
+        rejected: [],
+      };
+    });
+
+    await expect(dispatchMcpTool("skill_select", { query: "review" }, { skillRoots: ["/skills/a", "/skills/b"] })).resolves.toMatchObject({
+      selected: { name: "b" },
+      rejected: [{ name: "a" }],
+    });
+  });
+
+  it("requires explicit graph path when multiple paths are configured", async () => {
+    await expect(dispatchMcpTool("skill_graph", {}, { skillRoots: ["/skills/a", "/skills/b"] })).rejects.toThrow(/explicit path/);
   });
 
   it("describes the skill_select query contract and guidance", () => {

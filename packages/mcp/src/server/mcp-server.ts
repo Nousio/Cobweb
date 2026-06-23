@@ -4,6 +4,7 @@ import { callDaemon, openDaemonLease, type DaemonLeaseHandle } from "@cobweb/dae
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { resolve } from "node:path";
 
 const MCP_LEASE_TTL_MS = 30_000;
 const MCP_LEASE_HEARTBEAT_MS = 10_000;
@@ -14,7 +15,13 @@ type ToolName = keyof Pick<
   "status" | "scan" | "skill_graph" | "skill_chain" | "skill_search" | "skill_select" | "skill_context" | "skill_validate"
 >;
 
-export const mcpTools: Array<{ name: ToolName; description: string; inputSchema: Record<string, unknown> }> = [
+export interface McpServerOptions {
+  skillRoots?: string[];
+}
+
+type McpToolDefinition = { name: ToolName; description: string; inputSchema: Record<string, unknown> };
+
+const baseMcpTools: McpToolDefinition[] = [
   {
     name: "status",
     description: "Return Cobweb daemon status.",
@@ -113,9 +120,36 @@ export const mcpTools: Array<{ name: ToolName; description: string; inputSchema:
   },
 ];
 
-export async function runMcpServer(): Promise<void> {
+export function createMcpTools(options: McpServerOptions = {}): McpToolDefinition[] {
+  const roots = normalizeSkillRoots(options.skillRoots);
+  if (roots.length === 0) {
+    return baseMcpTools;
+  }
+
+  const optionalPathTools = new Set<ToolName>(["scan", "skill_search", "skill_select"]);
+  if (roots.length === 1) {
+    optionalPathTools.add("skill_graph");
+    optionalPathTools.add("skill_chain");
+  }
+
+  return baseMcpTools.map((tool) => {
+    if (!optionalPathTools.has(tool.name)) {
+      return tool;
+    }
+    return {
+      ...tool,
+      description: `${tool.description} If omitted, path defaults to configured cobweb-mcp --path root${roots.length > 1 ? "s" : ""}.`,
+      inputSchema: schemaWithOptionalPath(tool.inputSchema),
+    };
+  });
+}
+
+export const mcpTools = createMcpTools();
+
+export async function runMcpServer(options: McpServerOptions = {}): Promise<void> {
   const lease = await attachMcpRuntimeLease();
   const cleanupLease = registerMcpLeaseCleanup(lease);
+  const tools = createMcpTools(options);
   const server = new Server(
     {
       name: "cobweb",
@@ -128,15 +162,15 @@ export async function runMcpServer(): Promise<void> {
     },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: mcpTools }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name as ToolName;
-    const tool = mcpTools.find((candidate) => candidate.name === name);
+    const tool = tools.find((candidate) => candidate.name === name);
     if (!tool) {
       throw new Error(`Unknown tool: ${request.params.name}`);
     }
 
-    const result = await dispatchMcpTool(name, request.params.arguments ?? {});
+    const result = await dispatchMcpTool(name, request.params.arguments ?? {}, options);
     return {
       content: [
         {
@@ -232,24 +266,73 @@ async function detachLeaseBestEffort(lease: DaemonLeaseHandle, timeoutMs: number
   }
 }
 
-export async function dispatchMcpTool(name: ToolName, args: unknown): Promise<unknown> {
+export async function dispatchMcpTool(name: ToolName, args: unknown, options: McpServerOptions = {}): Promise<unknown> {
   switch (name) {
     case "status":
       return callDaemonForMcp("status", undefined);
-    case "scan":
-      return callDaemonForMcp("scan", expectArgs<DaemonMethods["scan"]["params"]>(args));
-    case "skill_graph":
-      return callDaemonForMcp("skill_graph", expectArgs<DaemonMethods["skill_graph"]["params"]>(args));
-    case "skill_chain":
-      return callDaemonForMcp("skill_chain", expectArgs<DaemonMethods["skill_chain"]["params"]>(args));
-    case "skill_search":
-      return callDaemonForMcp("skill_search", expectArgs<DaemonMethods["skill_search"]["params"]>(args));
-    case "skill_select":
-      return callDaemonForMcp("skill_select", expectArgs<DaemonMethods["skill_select"]["params"]>(args));
-    case "skill_context":
-      return callDaemonForMcp("skill_context", expectArgs<DaemonMethods["skill_context"]["params"]>(args));
-    case "skill_validate":
-      return callDaemonForMcp("skill_validate", expectArgs<DaemonMethods["skill_validate"]["params"]>(args));
+    case "scan": {
+      const params = expectArgs<Partial<DaemonMethods["scan"]["params"]>>(args);
+      const roots = resolveToolRoots(name, params.path, options);
+      if (roots.length === 1) {
+        return callDaemonForMcp("scan", { path: roots[0] });
+      }
+      return mergeScanResults(await Promise.all(roots.map((path) => callDaemonForMcp("scan", { path }))));
+    }
+    case "skill_graph": {
+      const params = expectArgs<Partial<DaemonMethods["skill_graph"]["params"]>>(args);
+      return callDaemonForMcp("skill_graph", { ...params, path: resolveSingleToolRoot(name, params.path, options) });
+    }
+    case "skill_chain": {
+      const params = expectArgs<Partial<DaemonMethods["skill_chain"]["params"]>>(args);
+      if (!params.target) {
+        throw new Error("skill_chain requires target.");
+      }
+      return callDaemonForMcp("skill_chain", { ...params, target: params.target, path: resolveSingleToolRoot(name, params.path, options) });
+    }
+    case "skill_search": {
+      const params = expectArgs<Partial<DaemonMethods["skill_search"]["params"]>>(args);
+      if (!params.query) {
+        throw new Error("skill_search requires query.");
+      }
+      const query = params.query;
+      const roots = resolveToolRoots(name, params.path, options);
+      if (roots.length === 1) {
+        return callDaemonForMcp("skill_search", { ...params, query, path: roots[0] });
+      }
+      return mergeSkillSearchResults(
+        query,
+        await Promise.all(roots.map((path) => callDaemonForMcp("skill_search", { ...params, query, path }))),
+        params.limit,
+      );
+    }
+    case "skill_select": {
+      const params = expectArgs<Partial<DaemonMethods["skill_select"]["params"]>>(args);
+      if (!params.query) {
+        throw new Error("skill_select requires query.");
+      }
+      const query = params.query;
+      const roots = resolveToolRoots(name, params.path, options);
+      if (roots.length === 1) {
+        return callDaemonForMcp("skill_select", { ...params, query, path: roots[0] });
+      }
+      return mergeSkillSelectResults(
+        await Promise.all(roots.map((path) => callDaemonForMcp("skill_select", { ...params, query, path }))),
+      );
+    }
+    case "skill_context": {
+      const params = expectArgs<Partial<DaemonMethods["skill_context"]["params"]>>(args);
+      if (!params.path) {
+        throw new Error("skill_context requires path to the selected skill.");
+      }
+      return callDaemonForMcp("skill_context", { path: params.path });
+    }
+    case "skill_validate": {
+      const params = expectArgs<Partial<DaemonMethods["skill_validate"]["params"]>>(args);
+      if (!params.path) {
+        throw new Error("skill_validate requires path to the skill directory.");
+      }
+      return callDaemonForMcp("skill_validate", { path: params.path });
+    }
   }
 }
 
@@ -265,4 +348,85 @@ function expectArgs<T>(value: unknown): T {
     throw new Error("Tool arguments must be an object.");
   }
   return value as T;
+}
+
+function normalizeSkillRoots(paths: string[] | undefined): string[] {
+  const roots = (paths ?? []).map((path) => path.trim()).filter(Boolean).map((path) => resolve(path));
+  return Array.from(new Set(roots));
+}
+
+function resolveToolRoots(toolName: ToolName, path: string | undefined, options: McpServerOptions): string[] {
+  if (path) {
+    return [path];
+  }
+  const roots = normalizeSkillRoots(options.skillRoots);
+  if (roots.length === 0) {
+    throw new Error(`${toolName} requires path unless cobweb-mcp is started with --path.`);
+  }
+  return roots;
+}
+
+function resolveSingleToolRoot(toolName: ToolName, path: string | undefined, options: McpServerOptions): string {
+  const roots = resolveToolRoots(toolName, path, options);
+  if (roots.length !== 1) {
+    throw new Error(`${toolName} requires an explicit path when cobweb-mcp has multiple --path entries.`);
+  }
+  return roots[0]!;
+}
+
+function schemaWithOptionalPath(schema: Record<string, unknown>): Record<string, unknown> {
+  const required = Array.isArray(schema.required) ? schema.required.filter((item) => item !== "path") : undefined;
+  return required && required.length > 0 ? { ...schema, required } : { ...schema, required: undefined };
+}
+
+function mergeScanResults(results: Array<DaemonMethods["scan"]["result"]>): DaemonMethods["scan"]["result"] {
+  return {
+    candidates: results.flatMap((result) => result.candidates),
+    warnings: results.flatMap((result) => result.warnings),
+  };
+}
+
+function mergeSkillSearchResults(
+  query: string,
+  results: Array<DaemonMethods["skill_search"]["result"]>,
+  limit: number | undefined,
+): DaemonMethods["skill_search"]["result"] {
+  const candidates = results.flatMap((result) => result.candidates).sort((left, right) => right.score - left.score);
+  return {
+    query,
+    freshness: mergeFreshness(results.map((result) => result.freshness)),
+    candidates: typeof limit === "number" ? candidates.slice(0, limit) : candidates,
+    warnings: results.flatMap((result) => result.warnings),
+  };
+}
+
+function mergeSkillSelectResults(results: Array<DaemonMethods["skill_select"]["result"]>): DaemonMethods["skill_select"]["result"] {
+  const ranked = results
+    .filter((result) => result.selected)
+    .sort((left, right) => (right.selected?.score ?? 0) - (left.selected?.score ?? 0));
+  const winner = ranked[0] ?? results[0];
+  if (!winner) {
+    throw new Error("skill_select did not return a result.");
+  }
+  const rejected = results.flatMap((result) => [
+    ...(result.selected && result.selected.path !== winner.selected?.path
+      ? [{ path: result.selected.path, name: result.selected.name, reason: "Lower ranked match from another configured root." }]
+      : []),
+    ...result.rejected,
+  ]);
+  return {
+    ...winner,
+    freshness: mergeFreshness(results.map((result) => result.freshness)),
+    rejected: rejected.filter((candidate) => candidate.path !== winner.selected?.path),
+  };
+}
+
+function mergeFreshness(values: Array<DaemonMethods["skill_search"]["result"]["freshness"]>): DaemonMethods["skill_search"]["result"]["freshness"] {
+  if (values.includes("degraded")) {
+    return "degraded";
+  }
+  if (values.includes("rebuilding")) {
+    return "rebuilding";
+  }
+  return "fresh";
 }
