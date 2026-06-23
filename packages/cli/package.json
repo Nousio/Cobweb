@@ -1,6 +1,6 @@
 {
   "name": "@cobweb/cli",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "type": "module",
   "license": "AGPL-3.0-only",
   "main": "./dist/index.js",
@@ -16,8 +16,8 @@
     "cw": "./dist/index.js"
   },
   "dependencies": {
-    "@cobweb/core": "0.4.2",
-    "@cobweb/daemon": "0.4.2",
+    "@cobweb/core": "0.4.3",
+    "@cobweb/daemon": "0.4.3",
     "commander": "^15.0.0"
   },
   "scripts": {

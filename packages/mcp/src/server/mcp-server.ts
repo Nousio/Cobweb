@@ -146,6 +146,46 @@ export function createMcpTools(options: McpServerOptions = {}): McpToolDefinitio
 
 export const mcpTools = createMcpTools();
 
+// Server-level instructions returned in the MCP `initialize` response. Hosts
+// surface this as the server's usage guidance, so the agent can self-route to
+// Cobweb without each user adding a manual rule. Keep it about when/how to use
+// the tools, not a copy of every tool schema.
+export const mcpInstructions = `# Cobweb — local SKILL.md routing over an indexed skill library
+
+Cobweb helps you reuse a better-matching local skill instead of reasoning from
+scratch. When you start a non-trivial task (implement, refactor, debug, review,
+trace logic, or author/validate a skill), check Cobweb first rather than waiting
+to be told.
+
+## When to use
+
+- Starting a task a local skill might already cover: route with \`skill_select\`.
+- Exploring what skills exist or why one matched: \`skill_search\`.
+- After choosing a skill: load its methods, policy, and resources with \`skill_context\`.
+- Authoring or changing a skill: \`skill_validate\`, plus \`skill_graph\` / \`skill_chain\` for topology.
+- Multi-step work: route each step separately (e.g. implement, then review).
+
+## How to route (skill_select)
+
+- Analyze the task first. Pass \`query\` as analyzed routing terms (intent verb + discriminative subject + optional constraints), NOT the raw user sentence.
+- Always pass \`workItem.subject\`: the concrete object under work (module, error, feature, config, code path). It is required and also feeds ranking.
+- Read \`selectionStatus\`:
+  - \`confident\`: use \`selected\` directly.
+  - \`needs_inspection\`: treat \`selected\` as tentative; follow \`guidance.inspectionTargets\` or call \`skill_context\` before relying on it.
+  - \`no_candidate\`: refine the query or inspect the scan root.
+- When a \`guidance\` object is returned, follow its checklist and re-route.
+- After a confident selection, call \`skill_context\` for the chosen skill before using it.
+
+## Path
+
+- If the server was started with \`--path\`, you may omit the tool \`path\` for \`scan\` / \`skill_search\` / \`skill_select\`; otherwise pass an absolute scan root.
+- \`skill_context\` always needs the concrete skill path (use \`selected.path\` from \`skill_select\`).
+
+## Boundaries
+
+- Cobweb routes local SKILL.md skills. It is not a code index, symbol search, or file reader — use your code tools for that.
+- No audit/risk/blocked judgment, no embedding or vector search, no external registry. Ranking is deterministic FTS plus structural signals; semantic judgment stays with you.`;
+
 export async function runMcpServer(options: McpServerOptions = {}): Promise<void> {
   const lease = await attachMcpRuntimeLease();
   const cleanupLease = registerMcpLeaseCleanup(lease);
@@ -153,12 +193,13 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<void
   const server = new Server(
     {
       name: "cobweb",
-      version: "0.4.2",
+      version: "0.4.3",
     },
     {
       capabilities: {
         tools: {},
       },
+      instructions: mcpInstructions,
     },
   );
 

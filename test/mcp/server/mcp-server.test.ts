@@ -14,7 +14,7 @@ vi.mock("@cobweb/daemon/client", () => ({
   openDaemonLease: (...args: unknown[]) => openDaemonLease(...args),
 }));
 
-const { attachMcpRuntimeLease, createMcpTools, dispatchMcpTool, mcpTools, registerMcpLeaseCleanup } = await import(
+const { attachMcpRuntimeLease, createMcpTools, dispatchMcpTool, mcpInstructions, mcpTools, registerMcpLeaseCleanup } = await import(
   "../../../packages/mcp/src/server/mcp-server.js"
 );
 const { parseMcpServerOptions, startMcpServerCli } = await import("../../../packages/mcp/src/index.js");
@@ -179,6 +179,21 @@ describe("MCP server tool dispatch", () => {
     expect(schema?.required).toContain("workItem");
     expect(schema?.properties?.workItem?.required).toEqual(["subject"]);
     expect(schema?.properties?.workItem?.properties).not.toHaveProperty("type");
+  });
+
+  it("ships server instructions that recommend the routing contract", () => {
+    expect(mcpInstructions).toMatch(/skill_select/);
+    expect(mcpInstructions).toMatch(/workItem\.subject/);
+    expect(mcpInstructions).toMatch(/selectionStatus/);
+    expect(mcpInstructions).toMatch(/needs_inspection/);
+    expect(mcpInstructions).toMatch(/skill_context/);
+    expect(mcpInstructions).toMatch(/analyzed routing terms/);
+  });
+
+  it("states boundaries so the agent does not treat Cobweb as a code index", () => {
+    expect(mcpInstructions).toMatch(/not a code index/);
+    expect(mcpInstructions).toMatch(/No audit/);
+    expect(mcpInstructions).toMatch(/no embedding/);
   });
 
   it("dispatches skill_select with the analyzed work item", async () => {

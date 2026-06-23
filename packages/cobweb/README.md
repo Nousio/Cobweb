@@ -88,13 +88,15 @@ What each part means:
 | `cobweb-mcp` | The binary to launch inside that package — this is the MCP server (not the CLI). |
 | `--path /Users/you/skills` | The skill directory this MCP server should serve by default. |
 
-> Want a fixed version instead of always-latest? Pin it: `"--package", "opencobweb@0.4.2"`. The `@0.4.2` part means version `0.4.2`.
+> Want a fixed version instead of always-latest? Pin it: `"--package", "opencobweb@0.4.3"`. The `@0.4.3` part means version `0.4.3`.
 
 ### 3. Restart the client and confirm the tools appear
 
 Restart (or reload) your MCP client. Cobweb's tools (`skill_search`, `skill_select`, `skill_context`, …) should now show up in the client's MCP/tools list. The first launch may take a few seconds while `npx` downloads the package.
 
 Cobweb is now installed and configured. When the agent calls `scan`, `skill_search`, or `skill_select` without an explicit tool `path`, Cobweb uses the `--path` directory from your MCP config.
+
+Cobweb also sends short usage instructions when the client connects. Clients that support MCP server instructions (such as Cursor) surface when and how to use these tools, so the agent can reach for Cobweb on its own — don't need to add a manual rule.
 
 ## Optional: global install
 

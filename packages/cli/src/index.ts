@@ -25,7 +25,7 @@ program
   .name("cobweb")
   .alias("cw")
   .description("Local governance kernel for agent skills")
-  .version("0.4.2");
+  .version("0.4.3");
 
 program
   .command("scan")

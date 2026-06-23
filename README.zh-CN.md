@@ -92,13 +92,15 @@ node --version
 | `--path /Users/you/skills` | 指定这个 MCP server 默认服务的 skill 目录。       |
 
 
-> 如果想固定版本而不是每次拉最新，把参数写成 `"--package", "opencobweb@0.4.2"` 即可，@0.4.2 代表 0.4.2 版本。
+> 如果想固定版本而不是每次拉最新，把参数写成 `"--package", "opencobweb@0.4.3"` 即可，@0.4.3 代表 0.4.3 版本。
 
 ### 3. 重启客户端，确认工具出现
 
 重启（或重新加载）MCP 客户端。Cobweb 的工具（`skill_search`、`skill_select`、`skill_context` 等）应该会出现在客户端的 MCP/工具列表里。首次启动可能要等几秒，`npx` 在下载包。
 
 到这里 Cobweb 已经安装并配置完成。之后 agent 调用 `scan`、`skill_search`、`skill_select` 时,如果没有显式传 `path`,Cobweb 会使用你在 MCP 配置里写的 `--path` 目录。
+
+支持 MCP server instructions 的客户端（例如 Cursor）会把"何时、如何使用这些工具"呈现出来，agent 因此能自己想到用 Cobweb，不需要再手动加一条 rule。
 
 ## 可选：全局安装
 

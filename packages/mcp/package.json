@@ -1,6 +1,6 @@
 {
   "name": "@cobweb/mcp",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "type": "module",
   "license": "AGPL-3.0-only",
   "main": "./dist/index.js",
@@ -15,8 +15,8 @@
     "cobweb-mcp": "./dist/index.js"
   },
   "dependencies": {
-    "@cobweb/core": "0.4.2",
-    "@cobweb/daemon": "0.4.2",
+    "@cobweb/core": "0.4.3",
+    "@cobweb/daemon": "0.4.3",
     "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "scripts": {
