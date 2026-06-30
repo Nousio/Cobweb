@@ -13,9 +13,9 @@ afterEach(async () => {
   roots = [];
 });
 
-describe("cobweb graph", () => {
+describe("skillroute graph", () => {
   it("prints a local read-only SkillGraph as JSON", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cobweb-cli-graph-"));
+    const root = await mkdtemp(join(tmpdir(), "skillroute-cli-graph-"));
     roots.push(root);
     await mkdir(join(root, "workflow"), { recursive: true });
     await writeFile(join(root, "workflow", "SKILL.md"), "---\nname: workflow\ndescription: Workflow\n---\n\n# Workflow\n\nBody.\n");

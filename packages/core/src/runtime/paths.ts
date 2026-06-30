@@ -10,13 +10,13 @@ export interface RuntimePaths {
 }
 
 export function defaultRuntimePaths(env: NodeJS.ProcessEnv = process.env): RuntimePaths {
-  const dataDir = env.COBWEB_DATA_DIR ?? join(homedir(), ".local", "share", "cobweb");
+  const dataDir = env.SKILLROUTE_DATA_DIR ?? join(homedir(), ".local", "share", "skillroute");
 
   return {
     dataDir,
-    dbPath: env.COBWEB_DB_PATH ?? join(dataDir, "cobweb.db"),
-    socketPath: env.COBWEB_SOCKET_PATH ?? join(dataDir, "cobwebd.sock"),
-    lockPath: env.COBWEB_LOCK_PATH ?? join(dataDir, "cobweb.lock.yaml"),
-    daemonLockPath: env.COBWEB_DAEMON_LOCK_PATH ?? join(dataDir, "cobwebd.lock.json"),
+    dbPath: env.SKILLROUTE_DB_PATH ?? join(dataDir, "skillroute.db"),
+    socketPath: env.SKILLROUTE_SOCKET_PATH ?? join(dataDir, "skillrouted.sock"),
+    lockPath: env.SKILLROUTE_LOCK_PATH ?? join(dataDir, "skillroute.lock.yaml"),
+    daemonLockPath: env.SKILLROUTE_DAEMON_LOCK_PATH ?? join(dataDir, "skillrouted.lock.json"),
   };
 }

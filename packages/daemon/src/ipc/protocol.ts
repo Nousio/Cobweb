@@ -15,7 +15,7 @@ import type {
   SkillValidateResult,
   VendorPlan,
   WriterQueueSnapshot,
-} from "@cobweb/core";
+} from "@skillroute/core";
 import type { IndexCheckKind, WatcherState } from "../app-state/app-state.js";
 
 export interface JsonRpcRequest<TParams = unknown> {

@@ -1,5 +1,5 @@
 {
-  "name": "cobweb-monorepo",
+  "name": "skillroute-monorepo",
   "version": "0.4.3",
   "private": true,
   "license": "AGPL-3.0-only",
@@ -8,8 +8,8 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -b packages/core packages/daemon packages/cli packages/mcp packages/cobweb",
-    "check": "tsc -b --pretty false packages/core packages/daemon packages/cli packages/mcp packages/cobweb",
+    "build": "tsc -b packages/core packages/daemon packages/cli packages/mcp packages/skillroute",
+    "check": "tsc -b --pretty false packages/core packages/daemon packages/cli packages/mcp packages/skillroute",
     "test": "vitest run",
     "dev:cli": "tsx packages/cli/src/index.ts",
     "dev:daemon": "tsx packages/daemon/src/index.ts"

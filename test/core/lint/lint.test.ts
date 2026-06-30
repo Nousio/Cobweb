@@ -48,7 +48,7 @@ describe("lintParsedSkill", () => {
   });
 
   it("flags missing local resources under the skill root", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cobweb-lint-"));
+    const root = await mkdtemp(join(tmpdir(), "skillroute-lint-"));
     await mkdir(join(root, "assets"));
     await writeFile(join(root, "assets", "present.md"), "ok");
 
@@ -68,7 +68,7 @@ describe("lintParsedSkill", () => {
   });
 
   it("lints a parsed skill directory", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cobweb-lint-dir-"));
+    const root = await mkdtemp(join(tmpdir(), "skillroute-lint-dir-"));
     await writeFile(
       join(root, "SKILL.md"),
       `---

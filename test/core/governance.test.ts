@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { readCobwebLockfile } from "../../packages/core/src/canonical/lockfile.js";
+import { readSkillRouteLockfile } from "../../packages/core/src/canonical/lockfile.js";
 import { importCanonicalSkill } from "../../packages/core/src/canonical/store.js";
 import { createMergePlan } from "../../packages/core/src/merge/merge.js";
 import { checkPolicyAlignment, updateSkillPolicy } from "../../packages/core/src/policy/policy.js";
@@ -19,13 +19,13 @@ async function writeSkill(root: string, name: string, body = "# Usage\n\nRun saf
 
 describe("core governance helpers", () => {
   it("imports a canonical skill and updates the lockfile", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cobweb-governance-"));
+    const root = await mkdtemp(join(tmpdir(), "skillroute-governance-"));
     const skill = await writeSkill(root, "review");
     const canonicalDir = join(root, "canonical");
-    const lockfilePath = join(root, "cobweb.lock.yaml");
+    const lockfilePath = join(root, "skillroute.lock.yaml");
 
     const record = await importCanonicalSkill(skill, { canonicalDir, lockfilePath });
-    const lockfile = await readCobwebLockfile(lockfilePath);
+    const lockfile = await readSkillRouteLockfile(lockfilePath);
     const canonicalSkill = await readFile(join(record.canonicalPath, "SKILL.md"), "utf8");
 
     expect(lockfile.skills).toHaveLength(1);
@@ -33,7 +33,7 @@ describe("core governance helpers", () => {
   });
 
   it("applies copy projections and detects drift", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cobweb-projection-"));
+    const root = await mkdtemp(join(tmpdir(), "skillroute-projection-"));
     const source = await writeSkill(root, "deploy");
     const provider = builtinProviders().find((candidate) => candidate.name === "agents")!;
     const plan = provider.project(
@@ -56,7 +56,7 @@ describe("core governance helpers", () => {
   });
 
   it("applies symlink projections", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cobweb-link-projection-"));
+    const root = await mkdtemp(join(tmpdir(), "skillroute-link-projection-"));
     const source = await writeSkill(root, "link-skill");
     const provider = builtinProviders().find((candidate) => candidate.name === "agents")!;
     const parsed = (await import("../../packages/core/src/parser/skill-parser.js")).parseSkillMarkdown(source, await readFile(join(source, "SKILL.md"), "utf8"));
@@ -78,7 +78,7 @@ describe("core governance helpers", () => {
   });
 
   it("updates policy and reports aligned sidecars", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cobweb-policy-"));
+    const root = await mkdtemp(join(tmpdir(), "skillroute-policy-"));
     const skill = await writeSkill(root, "policy");
 
     await updateSkillPolicy(skill, { implicitInvocation: false, selfContained: true });
@@ -87,7 +87,7 @@ describe("core governance helpers", () => {
   });
 
   it("creates vendor and merge plans", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cobweb-vendor-"));
+    const root = await mkdtemp(join(tmpdir(), "skillroute-vendor-"));
     await writeFile(join(root, "shared.md"), "shared", "utf8");
     const source = await writeSkill(root, "source", "Read [shared](../shared.md).\n");
     const target = await writeSkill(root, "target");
@@ -100,7 +100,7 @@ describe("core governance helpers", () => {
   });
 
   it("vendors colliding basenames without broad string replacement", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cobweb-vendor-collide-"));
+    const root = await mkdtemp(join(tmpdir(), "skillroute-vendor-collide-"));
     await mkdir(join(root, "one"), { recursive: true });
     await mkdir(join(root, "two"), { recursive: true });
     await writeFile(join(root, "one", "config.json"), "one", "utf8");

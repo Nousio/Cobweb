@@ -6,9 +6,9 @@ const fromRoot = (relativePath: string): string => fileURLToPath(new URL(relativ
 export default defineConfig({
   resolve: {
     alias: [
-      { find: "@cobweb/core/db", replacement: fromRoot("./packages/core/src/db/database.ts") },
-      { find: "@cobweb/core", replacement: fromRoot("./packages/core/src/index.ts") },
-      { find: "@cobweb/daemon/client", replacement: fromRoot("./packages/daemon/src/ipc/client.ts") },
+      { find: "@skillroute/core/db", replacement: fromRoot("./packages/core/src/db/database.ts") },
+      { find: "@skillroute/core", replacement: fromRoot("./packages/core/src/index.ts") },
+      { find: "@skillroute/daemon/client", replacement: fromRoot("./packages/daemon/src/ipc/client.ts") },
     ],
   },
   test: {

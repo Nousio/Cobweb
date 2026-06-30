@@ -3,14 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { importCanonicalSkill } from "../../../packages/core/src/canonical/store.js";
-import { CobwebDatabase } from "../../../packages/core/src/db/database.js";
+import { SkillRouteDatabase } from "../../../packages/core/src/db/database.js";
 import type { ParsedSkill } from "../../../packages/core/src/types.js";
 
-const open: CobwebDatabase[] = [];
+const open: SkillRouteDatabase[] = [];
 
-async function tempDb(): Promise<CobwebDatabase> {
-  const dir = await mkdtemp(join(tmpdir(), "cobweb-db-"));
-  const db = new CobwebDatabase(join(dir, "nested", "cobweb.db"));
+async function tempDb(): Promise<SkillRouteDatabase> {
+  const dir = await mkdtemp(join(tmpdir(), "skillroute-db-"));
+  const db = new SkillRouteDatabase(join(dir, "nested", "skillroute.db"));
   open.push(db);
   return db;
 }
@@ -41,7 +41,7 @@ afterEach(() => {
   }
 });
 
-describe("CobwebDatabase", () => {
+describe("SkillRouteDatabase", () => {
   it("initializes schema and passes integrity check", async () => {
     const db = await tempDb();
     expect(db.integrityCheck()).toBe("ok");
@@ -314,12 +314,12 @@ describe("CobwebDatabase", () => {
   });
 
   it("rebuilds from canonical skills listed in the lockfile", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cobweb-rebuild-"));
+    const root = await mkdtemp(join(tmpdir(), "skillroute-rebuild-"));
     const source = join(root, "source");
     await mkdir(source, { recursive: true });
     await writeFile(join(source, "SKILL.md"), "---\nname: rebuild\ndescription: Rebuild skill\n---\n\n# Body\n");
 
-    const lockfilePath = join(root, "cobweb.lock.yaml");
+    const lockfilePath = join(root, "skillroute.lock.yaml");
     await importCanonicalSkill(source, { canonicalDir: join(root, "canonical"), lockfilePath });
 
     const db = await tempDb();

@@ -83,7 +83,7 @@ describe("buildSkillGraph", () => {
   });
 
   it("marks scanRoot as the root skill when SKILL.md is at the scan root", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cobweb-skill-graph-root-"));
+    const root = await mkdtemp(join(tmpdir(), "skillroute-skill-graph-root-"));
     roots.push(root);
     await writeFile(join(root, "SKILL.md"), "---\nname: root-skill\ndescription: Root skill\n---\n\n# Root\n\nBody.\n");
 
@@ -96,7 +96,7 @@ describe("buildSkillGraph", () => {
 });
 
 async function createGraphFixture(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "cobweb-skill-graph-"));
+  const root = await mkdtemp(join(tmpdir(), "skillroute-skill-graph-"));
   roots.push(root);
   await mkdir(join(root, "parent", "child"), { recursive: true });
   await mkdir(join(root, "sibling"), { recursive: true });
@@ -128,7 +128,7 @@ async function createGraphFixture(): Promise<string> {
 }
 
 async function createChainFixture(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "cobweb-skill-chain-"));
+  const root = await mkdtemp(join(tmpdir(), "skillroute-skill-chain-"));
   roots.push(root);
   await mkdir(join(root, "parent"), { recursive: true });
   await mkdir(join(root, "child"), { recursive: true });
@@ -143,7 +143,7 @@ async function createChainFixture(): Promise<string> {
 }
 
 async function createIndirectCycleFixture(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "cobweb-skill-graph-indirect-cycle-"));
+  const root = await mkdtemp(join(tmpdir(), "skillroute-skill-graph-indirect-cycle-"));
   roots.push(root);
   for (const name of ["a", "b", "c"]) {
     await mkdir(join(root, name), { recursive: true });
@@ -155,7 +155,7 @@ async function createIndirectCycleFixture(): Promise<string> {
 }
 
 async function createWideFixture(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "cobweb-skill-graph-wide-"));
+  const root = await mkdtemp(join(tmpdir(), "skillroute-skill-graph-wide-"));
   roots.push(root);
   for (const name of ["a", "b", "c"]) {
     await mkdir(join(root, name), { recursive: true });

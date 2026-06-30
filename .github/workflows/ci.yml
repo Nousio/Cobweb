@@ -52,8 +52,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          export COBWEB_DATA_DIR="${RUNNER_TEMP}/cobweb-smoke"
-          daemon_log="${RUNNER_TEMP}/cobwebd.log"
+          export SKILLROUTE_DATA_DIR="${RUNNER_TEMP}/skillroute-smoke"
+          daemon_log="${RUNNER_TEMP}/skillrouted.log"
 
           cleanup() {
             npm run dev:cli -- daemon stop >/dev/null 2>&1 || true
@@ -61,7 +61,7 @@ jobs:
               wait "${daemon_pid}" >/dev/null 2>&1 || true
             fi
             if [[ -f "${daemon_log}" ]]; then
-              echo "::group::cobwebd log"
+              echo "::group::skillrouted log"
               cat "${daemon_log}"
               echo "::endgroup::"
             fi
@@ -72,14 +72,14 @@ jobs:
           daemon_pid=$!
 
           for _ in {1..40}; do
-            if [[ -S "${COBWEB_DATA_DIR}/cobwebd.sock" ]]; then
+            if [[ -S "${SKILLROUTE_DATA_DIR}/skillrouted.sock" ]]; then
               break
             fi
             sleep 0.25
           done
 
-          if [[ ! -S "${COBWEB_DATA_DIR}/cobwebd.sock" ]]; then
-            echo "cobwebd socket was not created"
+          if [[ ! -S "${SKILLROUTE_DATA_DIR}/skillrouted.sock" ]]; then
+            echo "skillrouted socket was not created"
             exit 1
           fi
 

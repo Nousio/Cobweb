@@ -1,4 +1,4 @@
-import type { DaemonMethods, DaemonStatus } from "@cobweb/daemon";
+import type { DaemonMethods, DaemonStatus } from "@skillroute/daemon";
 
 export function printText(value: string): void {
   process.stdout.write(`${value}\n`);
@@ -6,7 +6,7 @@ export function printText(value: string): void {
 
 export function formatDaemonStatus(status: DaemonStatus): string {
   const lines = [
-    "Cobweb daemon: running",
+    "SkillRoute daemon: running",
     `PID: ${status.pid}`,
     `Socket: ${status.socketPath}`,
     `Database: ${status.dbPath}`,
@@ -58,7 +58,7 @@ export function formatDaemonStatus(status: DaemonStatus): string {
 }
 
 export function formatDoctorResult(result: DaemonMethods["doctor"]["result"]): string {
-  const lines = [`Cobweb doctor: ${result.ok ? "ok" : "issues found"}`];
+  const lines = [`SkillRoute doctor: ${result.ok ? "ok" : "issues found"}`];
   for (const check of result.checks) {
     lines.push(`${check.ok ? "OK" : "FAIL"} ${check.name}${check.message ? ` - ${check.message}` : ""}`);
   }

@@ -13,7 +13,7 @@ async function writeSkill(dir: string, name: string, body = "# Body\n\nSafe cont
 }
 
 beforeAll(async () => {
-  root = await mkdtemp(join(tmpdir(), "cobweb-scan-"));
+  root = await mkdtemp(join(tmpdir(), "skillroute-scan-"));
   await writeSkill("alpha", "alpha");
   await writeSkill("beta", "beta");
   await writeSkill("nested/gamma", "alpha"); // duplicate name of alpha
@@ -38,7 +38,7 @@ describe("scanSkills", () => {
   });
 
   it("returns an empty result for a directory without skills", async () => {
-    const empty = await mkdtemp(join(tmpdir(), "cobweb-empty-"));
+    const empty = await mkdtemp(join(tmpdir(), "skillroute-empty-"));
     const result = await scanSkills(empty);
     expect(result.candidates).toHaveLength(0);
     expect(result.warnings).toHaveLength(0);

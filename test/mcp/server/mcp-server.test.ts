@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CobwebError } from "../../../packages/core/src/errors.js";
+import { SkillRouteError } from "../../../packages/core/src/errors.js";
 
 const callDaemon = vi.fn();
 const ensureDaemonRunning = vi.fn();
 const openDaemonLease = vi.fn();
 
-vi.mock("@cobweb/daemon", () => ({
+vi.mock("@skillroute/daemon", () => ({
   ensureDaemonRunning: (...args: unknown[]) => ensureDaemonRunning(...args),
 }));
 
-vi.mock("@cobweb/daemon/client", () => ({
+vi.mock("@skillroute/daemon/client", () => ({
   callDaemon: (...args: unknown[]) => callDaemon(...args),
   openDaemonLease: (...args: unknown[]) => openDaemonLease(...args),
 }));
@@ -190,7 +190,7 @@ describe("MCP server tool dispatch", () => {
     expect(mcpInstructions).toMatch(/analyzed routing terms/);
   });
 
-  it("states boundaries so the agent does not treat Cobweb as a code index", () => {
+  it("states boundaries so the agent does not treat SkillRoute as a code index", () => {
     expect(mcpInstructions).toMatch(/not a code index/);
     expect(mcpInstructions).toMatch(/No audit/);
     expect(mcpInstructions).toMatch(/no embedding/);
@@ -255,9 +255,9 @@ describe("MCP server tool dispatch", () => {
   });
 
   it("does not lazy-start the runtime from individual tool dispatch", async () => {
-    callDaemon.mockRejectedValue(new CobwebError("DAEMON_UNAVAILABLE", "Cannot connect to cobwebd"));
+    callDaemon.mockRejectedValue(new SkillRouteError("DAEMON_UNAVAILABLE", "Cannot connect to skillrouted"));
 
-    await expect(dispatchMcpTool("status", {})).rejects.toThrow(/Cannot connect to cobwebd/);
+    await expect(dispatchMcpTool("status", {})).rejects.toThrow(/Cannot connect to skillrouted/);
     expect(ensureDaemonRunning).not.toHaveBeenCalled();
     expect(openDaemonLease).not.toHaveBeenCalled();
   });

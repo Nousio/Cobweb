@@ -1,6 +1,6 @@
-import type { DaemonMethods } from "@cobweb/daemon";
-import { ensureDaemonRunning } from "@cobweb/daemon";
-import { callDaemon, openDaemonLease, type DaemonLeaseHandle } from "@cobweb/daemon/client";
+import type { DaemonMethods } from "@skillroute/daemon";
+import { ensureDaemonRunning } from "@skillroute/daemon";
+import { callDaemon, openDaemonLease, type DaemonLeaseHandle } from "@skillroute/daemon/client";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -24,7 +24,7 @@ type McpToolDefinition = { name: ToolName; description: string; inputSchema: Rec
 const baseMcpTools: McpToolDefinition[] = [
   {
     name: "status",
-    description: "Return Cobweb daemon status.",
+    description: "Return SkillRoute daemon status.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -83,7 +83,7 @@ const baseMcpTools: McpToolDefinition[] = [
   {
     name: "skill_select",
     description:
-      "Select the best indexed skill for a query with deterministic score breakdown and SkillGraph chain context. Before calling, analyze the user's task and provide `workItem.subject` for the concrete thing being handled; this is required so Cobweb can distinguish raw user text from an agent-analyzed routing request, and `subject` now also feeds ranking (candidates covering the core object rank higher), so set it to the real task object, not filler. Pass `query` as analyzed routing terms (intent verb + discriminative subject + optional constraints), NOT the raw user sentence; for a multi-step task (e.g. implement, then review, then trace logic) call this once per step. The result includes `selectionStatus`: use `selected` directly only when it is `confident`; when it is `needs_inspection`, treat `selected` as a tentative top-ranked candidate and inspect `guidance.inspectionTargets` or call `skill_context` before using it; when it is `no_candidate`, inspect the scan root or refine the query. The result may include a `guidance` object when workItem is missing, input quality is low, candidate confidence is low, or top candidates are close (reason one of missing_work_item | no_candidate | query_too_long | missing_subject | top1_confidence_low | top1_gap_small, with optional secondaryReasons): follow its `checklist` to re-analyze the task and call again. After a confident selection, call `skill_context` for the chosen skill to get its methods, policy, and resources.",
+      "Select the best indexed skill for a query with deterministic score breakdown and SkillGraph chain context. Before calling, analyze the user's task and provide `workItem.subject` for the concrete thing being handled; this is required so SkillRoute can distinguish raw user text from an agent-analyzed routing request, and `subject` now also feeds ranking (candidates covering the core object rank higher), so set it to the real task object, not filler. Pass `query` as analyzed routing terms (intent verb + discriminative subject + optional constraints), NOT the raw user sentence; for a multi-step task (e.g. implement, then review, then trace logic) call this once per step. The result includes `selectionStatus`: use `selected` directly only when it is `confident`; when it is `needs_inspection`, treat `selected` as a tentative top-ranked candidate and inspect `guidance.inspectionTargets` or call `skill_context` before using it; when it is `no_candidate`, inspect the scan root or refine the query. The result may include a `guidance` object when workItem is missing, input quality is low, candidate confidence is low, or top candidates are close (reason one of missing_work_item | no_candidate | query_too_long | missing_subject | top1_confidence_low | top1_gap_small, with optional secondaryReasons): follow its `checklist` to re-analyze the task and call again. After a confident selection, call `skill_context` for the chosen skill to get its methods, policy, and resources.",
     inputSchema: {
       type: "object",
       properties: {
@@ -138,7 +138,7 @@ export function createMcpTools(options: McpServerOptions = {}): McpToolDefinitio
     }
     return {
       ...tool,
-      description: `${tool.description} If omitted, path defaults to configured cobweb-mcp --path root${roots.length > 1 ? "s" : ""}.`,
+      description: `${tool.description} If omitted, path defaults to configured skillroute-mcp --path root${roots.length > 1 ? "s" : ""}.`,
       inputSchema: schemaWithOptionalPath(tool.inputSchema),
     };
   });
@@ -148,13 +148,13 @@ export const mcpTools = createMcpTools();
 
 // Server-level instructions returned in the MCP `initialize` response. Hosts
 // surface this as the server's usage guidance, so the agent can self-route to
-// Cobweb without each user adding a manual rule. Keep it about when/how to use
+// SkillRoute without each user adding a manual rule. Keep it about when/how to use
 // the tools, not a copy of every tool schema.
-export const mcpInstructions = `# Cobweb — local SKILL.md routing over an indexed skill library
+export const mcpInstructions = `# SkillRoute — local SKILL.md routing over an indexed skill library
 
-Cobweb helps you reuse a better-matching local skill instead of reasoning from
+SkillRoute helps you reuse a better-matching local skill instead of reasoning from
 scratch. When you start a non-trivial task (implement, refactor, debug, review,
-trace logic, or author/validate a skill), check Cobweb first rather than waiting
+trace logic, or author/validate a skill), check SkillRoute first rather than waiting
 to be told.
 
 ## When to use
@@ -183,7 +183,7 @@ to be told.
 
 ## Boundaries
 
-- Cobweb routes local SKILL.md skills. It is not a code index, symbol search, or file reader — use your code tools for that.
+- SkillRoute routes local SKILL.md skills. It is not a code index, symbol search, or file reader — use your code tools for that.
 - No audit/risk/blocked judgment, no embedding or vector search, no external registry. Ranking is deterministic FTS plus structural signals; semantic judgment stays with you.`;
 
 export async function runMcpServer(options: McpServerOptions = {}): Promise<void> {
@@ -192,7 +192,7 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<void
   const tools = createMcpTools(options);
   const server = new Server(
     {
-      name: "cobweb",
+      name: "skillroute",
       version: "0.4.3",
     },
     {
@@ -402,7 +402,7 @@ function resolveToolRoots(toolName: ToolName, path: string | undefined, options:
   }
   const roots = normalizeSkillRoots(options.skillRoots);
   if (roots.length === 0) {
-    throw new Error(`${toolName} requires path unless cobweb-mcp is started with --path.`);
+    throw new Error(`${toolName} requires path unless skillroute-mcp is started with --path.`);
   }
   return roots;
 }
@@ -410,7 +410,7 @@ function resolveToolRoots(toolName: ToolName, path: string | undefined, options:
 function resolveSingleToolRoot(toolName: ToolName, path: string | undefined, options: McpServerOptions): string {
   const roots = resolveToolRoots(toolName, path, options);
   if (roots.length !== 1) {
-    throw new Error(`${toolName} requires an explicit path when cobweb-mcp has multiple --path entries.`);
+    throw new Error(`${toolName} requires an explicit path when skillroute-mcp has multiple --path entries.`);
   }
   return roots[0]!;
 }

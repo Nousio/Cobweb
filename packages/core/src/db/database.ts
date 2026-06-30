@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { readCobwebLockfile } from "../canonical/lockfile.js";
+import { readSkillRouteLockfile } from "../canonical/lockfile.js";
 import { jaccardSimilarity, tokenizeText } from "../dedup/similarity.js";
 import { sha256 } from "../hash.js";
 import { parseSkillDirectory } from "../parser/skill-parser.js";
@@ -78,7 +78,7 @@ interface SearchRow {
   indexed_method_summary: string;
 }
 
-export class CobwebDatabase {
+export class SkillRouteDatabase {
   private readonly db: DatabaseSync;
 
   constructor(readonly path: string) {
@@ -256,7 +256,7 @@ export class CobwebDatabase {
   }
 
   async rebuildFromLockfile(lockfilePath: string, options: BulkImportOptions = {}): Promise<ImportedSkillRecord[]> {
-    const lockfile = await readCobwebLockfile(lockfilePath);
+    const lockfile = await readSkillRouteLockfile(lockfilePath);
     const records = await Promise.all(lockfile.skills.map((record) => parseSkillDirectory(record.canonicalPath)));
     const imported = this.bulkUpsertSkills(records, options);
     this.pruneSkillsOutside(imported.map((record) => record.id));
@@ -637,7 +637,7 @@ export class CobwebDatabase {
       ok,
       message: ok
         ? `${skillCount} indexed skill(s)`
-        : `${missingFts} skill(s) missing FTS rows, ${staleFts} stale FTS row(s); run \`cobweb daemon repair\` or search the affected root to reconcile`,
+        : `${missingFts} skill(s) missing FTS rows, ${staleFts} stale FTS row(s); run \`skillroute daemon repair\` or search the affected root to reconcile`,
     };
   }
 

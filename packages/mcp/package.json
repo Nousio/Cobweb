@@ -1,5 +1,5 @@
 {
-  "name": "@cobweb/mcp",
+  "name": "@skillroute/mcp",
   "version": "0.4.3",
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -12,11 +12,11 @@
     "dist/**/*.d.ts.map"
   ],
   "bin": {
-    "cobweb-mcp": "./dist/index.js"
+    "skillroute-mcp": "./dist/index.js"
   },
   "dependencies": {
-    "@cobweb/core": "0.4.3",
-    "@cobweb/daemon": "0.4.3",
+    "@skillroute/core": "0.4.3",
+    "@skillroute/daemon": "0.4.3",
     "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "scripts": {

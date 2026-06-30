@@ -1,0 +1,42 @@
+{
+  "name": "skillroute",
+  "version": "0.4.3",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "description": "SkillRoute MCP server package for working with local Agent Skills.",
+  "main": "./dist/cli.js",
+  "types": "./dist/cli.d.ts",
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "LICENSE",
+    "README.md"
+  ],
+  "bin": {
+    "skillroute": "./dist/cli.js",
+    "sr": "./dist/cli.js",
+    "skillrouted": "./dist/daemon.js",
+    "skillroute-mcp": "./dist/mcp.js"
+  },
+  "bundledDependencies": [
+    "@skillroute/core",
+    "@skillroute/daemon",
+    "@skillroute/cli",
+    "@skillroute/mcp"
+  ],
+  "dependencies": {
+    "@skillroute/core": "0.4.3",
+    "@skillroute/daemon": "0.4.3",
+    "@skillroute/cli": "0.4.3",
+    "@skillroute/mcp": "0.4.3"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b --pretty false"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

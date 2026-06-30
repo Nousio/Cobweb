@@ -6,8 +6,8 @@ describe("formatDaemonStatus", () => {
     const output = formatDaemonStatus({
       running: true,
       pid: 123,
-      socketPath: "/tmp/cobwebd.sock",
-      dbPath: "/tmp/cobweb.db",
+      socketPath: "/tmp/skillrouted.sock",
+      dbPath: "/tmp/skillroute.db",
       db: { total: 2 },
       freshness: "fresh",
       writer: { pending: 0, running: null, recent: [] },
@@ -41,7 +41,7 @@ describe("formatDaemonStatus", () => {
       },
     });
 
-    expect(output).toContain("Cobweb daemon: running");
+    expect(output).toContain("SkillRoute daemon: running");
     expect(output).toContain("Skills: 2 total");
     expect(output).toContain("Root: /tmp/skills [fresh]");
     expect(output).toContain("watcher=ready");
@@ -60,7 +60,7 @@ describe("formatDoctorResult", () => {
       ],
     });
 
-    expect(output).toContain("Cobweb doctor: issues found");
+    expect(output).toContain("SkillRoute doctor: issues found");
     expect(output).toContain("OK sqlite_integrity");
     expect(output).toContain("FAIL fts_consistency - rebuild required");
   });

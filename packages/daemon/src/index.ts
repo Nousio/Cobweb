@@ -55,7 +55,7 @@ export async function ensureDaemonRunning(options: EnsureDaemonRunningOptions = 
 
   const pid = spawnDaemonProcess();
   if (pid === null) {
-    throw new Error("Cobweb runtime is not reachable and could not be started automatically.");
+    throw new Error("SkillRoute runtime is not reachable and could not be started automatically.");
   }
 
   const attempts = options.attempts ?? 20;
@@ -70,12 +70,12 @@ export async function ensureDaemonRunning(options: EnsureDaemonRunningOptions = 
     }
   }
 
-  throw new Error("Cobweb runtime start timed out before it became ready.");
+  throw new Error("SkillRoute runtime start timed out before it became ready.");
 }
 
 export function resolveDaemonEntrypoint(): string | null {
-  if (process.env.COBWEBD_BIN) {
-    return process.env.COBWEBD_BIN;
+  if (process.env.SKILLROUTED_BIN) {
+    return process.env.SKILLROUTED_BIN;
   }
 
   const entrypoint = fileURLToPath(import.meta.url);

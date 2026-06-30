@@ -305,7 +305,7 @@ export interface CanonicalSkillRecord {
   provenance?: Record<string, unknown>;
 }
 
-export interface CobwebLockfile {
+export interface SkillRouteLockfile {
   version: 1;
   generatedAt: string;
   skills: CanonicalSkillRecord[];

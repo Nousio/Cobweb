@@ -40,8 +40,8 @@ function failFast(error: unknown): void {
 export function parseMcpServerOptions(argv: string[], env: NodeJS.ProcessEnv = process.env): McpServerOptions {
   const skillRoots: string[] = [];
 
-  appendEnvPaths(skillRoots, env.COBWEB_SKILL_PATH);
-  appendEnvPaths(skillRoots, env.COBWEB_SKILL_PATHS);
+  appendEnvPaths(skillRoots, env.SKILLROUTE_SKILL_PATH);
+  appendEnvPaths(skillRoots, env.SKILLROUTE_SKILL_PATHS);
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -58,7 +58,7 @@ export function parseMcpServerOptions(argv: string[], env: NodeJS.ProcessEnv = p
         index += 1;
       }
       if (dirs.length === 0) {
-        throw new Error("cobweb-mcp --path requires a directory value.");
+        throw new Error("skillroute-mcp --path requires a directory value.");
       }
       for (const dir of dirs) {
         skillRoots.push(requireNonEmptyPath(dir));
@@ -69,7 +69,7 @@ export function parseMcpServerOptions(argv: string[], env: NodeJS.ProcessEnv = p
       skillRoots.push(requireNonEmptyPath(arg.slice("--path=".length)));
       continue;
     }
-    throw new Error(`Unknown cobweb-mcp option: ${arg}`);
+    throw new Error(`Unknown skillroute-mcp option: ${arg}`);
   }
 
   return skillRoots.length > 0 ? { skillRoots } : {};
@@ -78,7 +78,7 @@ export function parseMcpServerOptions(argv: string[], env: NodeJS.ProcessEnv = p
 function requireNonEmptyPath(value: string): string {
   const trimmed = value.trim();
   if (trimmed === "") {
-    throw new Error("cobweb-mcp --path requires a non-empty directory.");
+    throw new Error("skillroute-mcp --path requires a non-empty directory.");
   }
   return trimmed;
 }

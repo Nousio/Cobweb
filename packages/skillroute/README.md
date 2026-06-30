@@ -1,8 +1,6 @@
 # SkillRoute
 
-English | [简体中文](./README.zh-CN.md)
-
-<sub>License: [AGPL-3.0-only](./LICENSE).</sub>
+<sub>License: AGPL-3.0-only.</sub>
 
 SkillRoute helps an AI agent quickly find a better-matching skill from your local `SKILL.md` library. Instead of pasting every skill's full text into the conversation, the agent searches a local index, gets match reasons, and loads only the selected skill's context on demand. This can reduce token waste from loading every skill up front.
 
@@ -313,4 +311,4 @@ export SKILLROUTE_DATA_DIR="/Users/you/.local/share/skillroute"
 
 ## License
 
-[AGPL-3.0-only](./LICENSE).
+AGPL-3.0-only.

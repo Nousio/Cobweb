@@ -1,4 +1,4 @@
-import { CobwebError, defaultRuntimePaths } from "@cobweb/core";
+import { SkillRouteError, defaultRuntimePaths } from "@skillroute/core";
 import { randomUUID } from "node:crypto";
 import net from "node:net";
 import type { DaemonMethods, JsonRpcRequest, JsonRpcResponse } from "./protocol.js";
@@ -24,7 +24,7 @@ export async function callDaemon<K extends keyof DaemonMethods>(
 
   const response = await send(socketPath, request);
   if (!response.ok) {
-    throw new CobwebError(response.error.code, response.error.message, {
+    throw new SkillRouteError(response.error.code, response.error.message, {
       retryable: response.error.retryable,
     });
   }
@@ -87,12 +87,12 @@ async function send(socketPath: string, request: JsonRpcRequest): Promise<JsonRp
       try {
         resolve(JSON.parse(line) as JsonRpcResponse);
       } catch (error) {
-        reject(new CobwebError("BAD_DAEMON_RESPONSE", "Daemon returned invalid JSON.", { cause: error }));
+        reject(new SkillRouteError("BAD_DAEMON_RESPONSE", "Daemon returned invalid JSON.", { cause: error }));
       }
     });
 
     socket.once("error", (error) => {
-      reject(new CobwebError("DAEMON_UNAVAILABLE", `Cannot connect to cobwebd: ${error.message}`, { cause: error }));
+      reject(new SkillRouteError("DAEMON_UNAVAILABLE", `Cannot connect to skillrouted: ${error.message}`, { cause: error }));
     });
   });
 }
@@ -130,7 +130,7 @@ function openPersistentConnection(socketPath: string): Promise<PersistentConnect
               resolve(response) {
                 if (!response.ok) {
                   callReject(
-                    new CobwebError(response.error.code, response.error.message, {
+                    new SkillRouteError(response.error.code, response.error.message, {
                       retryable: response.error.retryable,
                     }),
                   );
@@ -163,7 +163,7 @@ function openPersistentConnection(socketPath: string): Promise<PersistentConnect
         try {
           response = JSON.parse(line) as JsonRpcResponse;
         } catch (error) {
-          failPending(new CobwebError("BAD_DAEMON_RESPONSE", "Daemon returned invalid JSON.", { cause: error }));
+          failPending(new SkillRouteError("BAD_DAEMON_RESPONSE", "Daemon returned invalid JSON.", { cause: error }));
           continue;
         }
         const entry = pending.get(response.id);
@@ -176,7 +176,7 @@ function openPersistentConnection(socketPath: string): Promise<PersistentConnect
     });
 
     socket.once("error", (error) => {
-      const wrapped = new CobwebError("DAEMON_UNAVAILABLE", `Cannot connect to cobwebd: ${error.message}`, { cause: error });
+      const wrapped = new SkillRouteError("DAEMON_UNAVAILABLE", `Cannot connect to skillrouted: ${error.message}`, { cause: error });
       if (!connected) {
         reject(wrapped);
       }
@@ -184,7 +184,7 @@ function openPersistentConnection(socketPath: string): Promise<PersistentConnect
     });
 
     socket.once("close", () => {
-      const error = new CobwebError("DAEMON_UNAVAILABLE", "Connection to cobwebd closed.");
+      const error = new SkillRouteError("DAEMON_UNAVAILABLE", "Connection to skillrouted closed.");
       if (!connected) {
         reject(error);
       }

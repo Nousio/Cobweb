@@ -1,4 +1,4 @@
-import type { RoutingGuidance, RoutingWorkItem, SkillSearchCandidate, SkillSearchResult, SkillSelectionStatus } from "@cobweb/core";
+import type { RoutingGuidance, RoutingWorkItem, SkillSearchCandidate, SkillSearchResult, SkillSelectionStatus } from "@skillroute/core";
 import {
   applyProjectionPlan,
   applyVendorPlan,
@@ -6,18 +6,18 @@ import {
   builtinProviders,
   canonicalSkillFromRecord,
   checkPolicyAlignment,
-  CobwebError,
+  SkillRouteError,
   createVendorPlan,
   evaluateRoutingGuidance,
   importCanonicalSkill,
   lintSkillDirectory,
   parseSkillDirectory,
-  readCobwebLockfile,
+  readSkillRouteLockfile,
   scanSkills,
   skillChain,
   toErrorMessage,
   updateSkillPolicy,
-} from "@cobweb/core";
+} from "@skillroute/core";
 import { randomUUID } from "node:crypto";
 import { access, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
@@ -47,7 +47,7 @@ export async function startIpcServer(state: AppState): Promise<DaemonServer> {
   await chmod(dirname(state.paths.socketPath), 0o700);
   if (await pathExists(state.paths.socketPath)) {
     if (await isSocketAlive(state.paths.socketPath)) {
-      throw new CobwebError("DAEMON_ALREADY_RUNNING", `cobwebd is already listening on ${state.paths.socketPath}`);
+      throw new SkillRouteError("DAEMON_ALREADY_RUNNING", `skillrouted is already listening on ${state.paths.socketPath}`);
     }
     await rm(state.paths.socketPath, { force: true });
   }
@@ -179,7 +179,7 @@ async function handleLine(state: AppState, line: string, context: ConnectionCont
     try {
       request = JSON.parse(line) as JsonRpcRequest;
     } catch (error) {
-      return failure("unknown", new CobwebError("BAD_JSON", "Invalid JSON-RPC request.", { cause: error }));
+      return failure("unknown", new SkillRouteError("BAD_JSON", "Invalid JSON-RPC request.", { cause: error }));
     }
 
     try {
@@ -236,7 +236,7 @@ async function dispatch(state: AppState, request: JsonRpcRequest, context: Conne
       const params = expectParams<{ leaseId: string; ttlMs?: number }>(request.params);
       const lease = state.leases.get(params.leaseId);
       if (!lease) {
-        throw new CobwebError("LEASE_NOT_FOUND", `Runtime lease is not active: ${params.leaseId}`, { retryable: true });
+        throw new SkillRouteError("LEASE_NOT_FOUND", `Runtime lease is not active: ${params.leaseId}`, { retryable: true });
       }
       const now = Date.now();
       lease.lastHeartbeatAt = new Date(now).toISOString();
@@ -298,9 +298,9 @@ async function dispatch(state: AppState, request: JsonRpcRequest, context: Conne
         request.params,
       );
       if (!isAbsolute(params.projectRoot)) {
-        throw new CobwebError("BAD_PARAMS", "sync projectRoot must be an absolute path.");
+        throw new SkillRouteError("BAD_PARAMS", "sync projectRoot must be an absolute path.");
       }
-      const lockfile = await readCobwebLockfile(state.paths.lockPath);
+      const lockfile = await readSkillRouteLockfile(state.paths.lockPath);
       const providers = builtinProviders().filter((provider) => !params.target || params.target.includes(provider.name));
       const plans = lockfile.skills.flatMap((record) =>
         providers.map((provider) =>
@@ -339,7 +339,7 @@ async function dispatch(state: AppState, request: JsonRpcRequest, context: Conne
       if (params.path) {
         return checkPolicyAlignment(params.path);
       }
-      const lockfile = await readCobwebLockfile(state.paths.lockPath);
+      const lockfile = await readSkillRouteLockfile(state.paths.lockPath);
       const results = await Promise.all(lockfile.skills.map((record) => checkPolicyAlignment(record.canonicalPath)));
       return {
         ok: results.every((result) => result.ok),
@@ -495,7 +495,7 @@ async function dispatch(state: AppState, request: JsonRpcRequest, context: Conne
     case "stop":
       return { stopping: true };
     default:
-      throw new CobwebError("UNKNOWN_METHOD", `Unknown daemon method: ${request.method}`);
+      throw new SkillRouteError("UNKNOWN_METHOD", `Unknown daemon method: ${request.method}`);
   }
 }
 
@@ -593,7 +593,7 @@ async function acquireDaemonLock(state: AppState): Promise<void> {
   if (await pathExists(path)) {
     const existing = await readDaemonLock(path);
     if (existing && processAlive(existing.pid)) {
-      throw new CobwebError("DAEMON_ALREADY_RUNNING", `cobwebd lock is held by pid ${existing.pid}`);
+      throw new SkillRouteError("DAEMON_ALREADY_RUNNING", `skillrouted lock is held by pid ${existing.pid}`);
     }
     await rm(path, { force: true });
   }
@@ -647,18 +647,18 @@ function processAlive(pid: number): boolean {
 }
 
 function daemonLockPath(state: AppState): string {
-  return state.paths.daemonLockPath ?? join(state.paths.dataDir, "cobwebd.lock.json");
+  return state.paths.daemonLockPath ?? join(state.paths.dataDir, "skillrouted.lock.json");
 }
 
 function expectParams<T>(value: unknown): T {
   if (!value || typeof value !== "object") {
-    throw new CobwebError("BAD_PARAMS", "Request params must be an object.");
+    throw new SkillRouteError("BAD_PARAMS", "Request params must be an object.");
   }
   return value as T;
 }
 
 function failure(id: string, error: unknown): JsonRpcResponse {
-  if (error instanceof CobwebError) {
+  if (error instanceof SkillRouteError) {
     return {
       id,
       ok: false,

@@ -1,4 +1,4 @@
-import { importCanonicalSkill } from "@cobweb/core";
+import { importCanonicalSkill } from "@skillroute/core";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
@@ -51,8 +51,8 @@ let skillRoot: string;
 let server: DaemonServer;
 
 beforeAll(async () => {
-  dir = await mkdtemp(join(tmpdir(), "cobweb-daemon-"));
-  socketPath = join(dir, "cobwebd.sock");
+  dir = await mkdtemp(join(tmpdir(), "skillroute-daemon-"));
+  socketPath = join(dir, "skillrouted.sock");
 
   skillRoot = join(dir, "skills", "review");
   await mkdir(skillRoot, { recursive: true });
@@ -63,7 +63,7 @@ beforeAll(async () => {
 
   const state = createAppState({
     dataDir: dir,
-    dbPath: join(dir, "cobweb.db"),
+    dbPath: join(dir, "skillroute.db"),
     socketPath,
     lockPath: join(dir, "lock.yaml"),
   });
@@ -89,7 +89,7 @@ describe("daemon IPC", () => {
   });
 
   it("builds a SkillGraph through the daemon", async () => {
-    const graphRoot = await mkdtemp(join(tmpdir(), "cobweb-daemon-graph-"));
+    const graphRoot = await mkdtemp(join(tmpdir(), "skillroute-daemon-graph-"));
     const graphSkill = join(graphRoot, "workflow");
     await mkdir(graphSkill, { recursive: true });
     await writeFile(join(graphSkill, "SKILL.md"), "---\nname: workflow\ndescription: Workflow\n---\n\n# Workflow\n\nUse [missing](../missing.md).\n");
@@ -107,7 +107,7 @@ describe("daemon IPC", () => {
   });
 
   it("returns a SkillGraph chain through the daemon", async () => {
-    const graphRoot = await mkdtemp(join(tmpdir(), "cobweb-daemon-chain-"));
+    const graphRoot = await mkdtemp(join(tmpdir(), "skillroute-daemon-chain-"));
     const parentSkill = join(graphRoot, "parent");
     const childSkill = join(graphRoot, "child");
     await mkdir(parentSkill, { recursive: true });
@@ -123,15 +123,15 @@ describe("daemon IPC", () => {
   });
 
   it("warms the root and watches its SKILL.md files for skill_graph only when watch is requested", async () => {
-    const watchRoot = await mkdtemp(join(tmpdir(), "cobweb-daemon-graph-watch-"));
+    const watchRoot = await mkdtemp(join(tmpdir(), "skillroute-daemon-graph-watch-"));
     const watchSkill = join(watchRoot, "workflow");
     await mkdir(watchSkill, { recursive: true });
     await writeFile(join(watchSkill, "SKILL.md"), "---\nname: workflow\ndescription: Workflow\n---\n\n# Workflow\n\nBody.\n");
 
-    const watchSocket = join(watchRoot, "cobwebd.sock");
+    const watchSocket = join(watchRoot, "skillrouted.sock");
     const watchState = createAppState({
       dataDir: watchRoot,
-      dbPath: join(watchRoot, "cobweb.db"),
+      dbPath: join(watchRoot, "skillroute.db"),
       socketPath: watchSocket,
       lockPath: join(watchRoot, "lock.yaml"),
     });
@@ -183,17 +183,17 @@ describe("daemon IPC", () => {
   });
 
   it("watches indexed SKILL.md files without recursively watching the query root", async () => {
-    const broadDir = await mkdtemp(join(tmpdir(), "cobweb-broad-root-"));
+    const broadDir = await mkdtemp(join(tmpdir(), "skillroute-broad-root-"));
     const broadSkill = join(broadDir, "skills", "review");
     const noiseDir = join(broadDir, "workspace", "repo", "logs");
     await mkdir(broadSkill, { recursive: true });
     await mkdir(noiseDir, { recursive: true });
     await writeFile(join(broadSkill, "SKILL.md"), "---\nname: broad-review\ndescription: Broad review\n---\n\n# Body\n\nReview body.\n");
 
-    const broadSocket = join(broadDir, "cobwebd.sock");
+    const broadSocket = join(broadDir, "skillrouted.sock");
     const broadState = createAppState({
       dataDir: broadDir,
-      dbPath: join(broadDir, "cobweb.db"),
+      dbPath: join(broadDir, "skillroute.db"),
       socketPath: broadSocket,
       lockPath: join(broadDir, "lock.yaml"),
     });
@@ -212,16 +212,16 @@ describe("daemon IPC", () => {
   });
 
   it("uses content hashes to skip unchanged roots on later searches", async () => {
-    const hashDir = await mkdtemp(join(tmpdir(), "cobweb-hash-reconcile-"));
+    const hashDir = await mkdtemp(join(tmpdir(), "skillroute-hash-reconcile-"));
     const hashSkill = join(hashDir, "review");
     await mkdir(hashSkill, { recursive: true });
     await writeFile(join(hashSkill, "SKILL.md"), "---\nname: hash-review\ndescription: Hash review\n---\n\n# Body\n\nStable body.\n");
 
-    const hashSocket = join(hashDir, "cobwebd.sock");
+    const hashSocket = join(hashDir, "skillrouted.sock");
     const hashServer = await startIpcServer(
       createAppState({
         dataDir: hashDir,
-        dbPath: join(hashDir, "cobweb.db"),
+        dbPath: join(hashDir, "skillroute.db"),
         socketPath: hashSocket,
         lockPath: join(hashDir, "lock.yaml"),
       }),
@@ -242,15 +242,15 @@ describe("daemon IPC", () => {
   });
 
   it("uses signature checks after the staleness budget expires", async () => {
-    const staleDir = await mkdtemp(join(tmpdir(), "cobweb-staleness-budget-"));
+    const staleDir = await mkdtemp(join(tmpdir(), "skillroute-staleness-budget-"));
     const staleSkill = join(staleDir, "review");
     await mkdir(staleSkill, { recursive: true });
     await writeFile(join(staleSkill, "SKILL.md"), "---\nname: stale-review\ndescription: Stale review\n---\n\n# Body\n\nStable body.\n");
 
-    const staleSocket = join(staleDir, "cobwebd.sock");
+    const staleSocket = join(staleDir, "skillrouted.sock");
     const state = createAppState({
       dataDir: staleDir,
-      dbPath: join(staleDir, "cobweb.db"),
+      dbPath: join(staleDir, "skillroute.db"),
       socketPath: staleSocket,
       lockPath: join(staleDir, "lock.yaml"),
     });
@@ -273,16 +273,16 @@ describe("daemon IPC", () => {
   });
 
   it("does not extend the staleness budget on repeated fast-path checks", async () => {
-    const missedDir = await mkdtemp(join(tmpdir(), "cobweb-missed-watch-budget-"));
+    const missedDir = await mkdtemp(join(tmpdir(), "skillroute-missed-watch-budget-"));
     const missedSkill = join(missedDir, "changing");
     const missedSkillFile = join(missedSkill, "SKILL.md");
     await mkdir(missedSkill, { recursive: true });
     await writeFile(missedSkillFile, "---\nname: missed-watch\ndescription: Missed watch\n---\n\n# Body\n\nOld body.\n");
 
-    const missedSocket = join(missedDir, "cobwebd.sock");
+    const missedSocket = join(missedDir, "skillrouted.sock");
     const state = createAppState({
       dataDir: missedDir,
-      dbPath: join(missedDir, "cobweb.db"),
+      dbPath: join(missedDir, "skillroute.db"),
       socketPath: missedSocket,
       lockPath: join(missedDir, "lock.yaml"),
     });
@@ -320,17 +320,17 @@ describe("daemon IPC", () => {
   });
 
   it("reflects SKILL.md changes through the watcher within the staleness budget", async () => {
-    const watchDir = await mkdtemp(join(tmpdir(), "cobweb-watch-update-"));
+    const watchDir = await mkdtemp(join(tmpdir(), "skillroute-watch-update-"));
     const watchSkill = join(watchDir, "changing");
     const watchSkillFile = join(watchSkill, "SKILL.md");
     await mkdir(watchSkill, { recursive: true });
     await writeFile(watchSkillFile, "---\nname: watch-update\ndescription: Watch update\n---\n\n# Body\n\nOld body.\n");
 
-    const watchSocket = join(watchDir, "cobwebd.sock");
+    const watchSocket = join(watchDir, "skillrouted.sock");
     const watchServer = await startIpcServer(
       createAppState({
         dataDir: watchDir,
-        dbPath: join(watchDir, "cobweb.db"),
+        dbPath: join(watchDir, "skillroute.db"),
         socketPath: watchSocket,
         lockPath: join(watchDir, "lock.yaml"),
       }),
@@ -358,7 +358,7 @@ describe("daemon IPC", () => {
   });
 
   it("falls back to full reconcile when a watcher is unavailable", async () => {
-    const unavailableDir = await mkdtemp(join(tmpdir(), "cobweb-watch-unavailable-"));
+    const unavailableDir = await mkdtemp(join(tmpdir(), "skillroute-watch-unavailable-"));
     const unavailableSkill = join(unavailableDir, "changing");
     const unavailableSkillFile = join(unavailableSkill, "SKILL.md");
     await mkdir(unavailableSkill, { recursive: true });
@@ -367,10 +367,10 @@ describe("daemon IPC", () => {
       "---\nname: unavailable-watch\ndescription: Watch unavailable\n---\n\n# Body\n\nOld body.\n",
     );
 
-    const unavailableSocket = join(unavailableDir, "cobwebd.sock");
+    const unavailableSocket = join(unavailableDir, "skillrouted.sock");
     const state = createAppState({
       dataDir: unavailableDir,
-      dbPath: join(unavailableDir, "cobweb.db"),
+      dbPath: join(unavailableDir, "skillroute.db"),
       socketPath: unavailableSocket,
       lockPath: join(unavailableDir, "lock.yaml"),
     });
@@ -407,15 +407,15 @@ describe("daemon IPC", () => {
   });
 
   it("coalesces concurrent searches for the same cold root", async () => {
-    const coalesceDir = await mkdtemp(join(tmpdir(), "cobweb-coalesce-"));
+    const coalesceDir = await mkdtemp(join(tmpdir(), "skillroute-coalesce-"));
     const coalesceSkill = join(coalesceDir, "review");
     await mkdir(coalesceSkill, { recursive: true });
     await writeFile(join(coalesceSkill, "SKILL.md"), "---\nname: coalesce-review\ndescription: Coalesce review\n---\n\n# Body\n\nConcurrent needle.\n");
 
-    const coalesceSocket = join(coalesceDir, "cobwebd.sock");
+    const coalesceSocket = join(coalesceDir, "skillrouted.sock");
     const state = createAppState({
       dataDir: coalesceDir,
-      dbPath: join(coalesceDir, "cobweb.db"),
+      dbPath: join(coalesceDir, "skillroute.db"),
       socketPath: coalesceSocket,
       lockPath: join(coalesceDir, "lock.yaml"),
     });
@@ -441,7 +441,7 @@ describe("daemon IPC", () => {
   });
 
   it("isolates a bad SKILL.md while indexing the rest of the root", async () => {
-    const partialDir = await mkdtemp(join(tmpdir(), "cobweb-partial-index-"));
+    const partialDir = await mkdtemp(join(tmpdir(), "skillroute-partial-index-"));
     const goodSkill = join(partialDir, "good");
     const badSkill = join(partialDir, "bad");
     await mkdir(goodSkill, { recursive: true });
@@ -449,11 +449,11 @@ describe("daemon IPC", () => {
     await writeFile(join(goodSkill, "SKILL.md"), "---\nname: good\ndescription: Good skill\n---\n\n# Body\n\nNeedle content.\n");
     await writeFile(join(badSkill, "SKILL.md"), "---\nname: [\n---\n\n# Broken\n");
 
-    const partialSocket = join(partialDir, "cobwebd.sock");
+    const partialSocket = join(partialDir, "skillrouted.sock");
     const partialServer = await startIpcServer(
       createAppState({
         dataDir: partialDir,
-        dbPath: join(partialDir, "cobweb.db"),
+        dbPath: join(partialDir, "skillroute.db"),
         socketPath: partialSocket,
         lockPath: join(partialDir, "lock.yaml"),
       }),
@@ -474,7 +474,7 @@ describe("daemon IPC", () => {
   });
 
   it("returns freshness for the requested root instead of the global index summary", async () => {
-    const multiRootDir = await mkdtemp(join(tmpdir(), "cobweb-root-freshness-"));
+    const multiRootDir = await mkdtemp(join(tmpdir(), "skillroute-root-freshness-"));
     const freshRoot = join(multiRootDir, "fresh-root");
     const freshSkill = join(freshRoot, "good");
     const degradedRoot = join(multiRootDir, "degraded-root");
@@ -486,11 +486,11 @@ describe("daemon IPC", () => {
     await writeFile(degradedSkillFile, "---\nname: blocked-read\ndescription: Blocked read\n---\n\n# Body\n\nBroken needle.\n");
     await chmod(degradedSkillFile, 0o000);
 
-    const multiSocket = join(multiRootDir, "cobwebd.sock");
+    const multiSocket = join(multiRootDir, "skillrouted.sock");
     const multiServer = await startIpcServer(
       createAppState({
         dataDir: multiRootDir,
-        dbPath: join(multiRootDir, "cobweb.db"),
+        dbPath: join(multiRootDir, "skillroute.db"),
         socketPath: multiSocket,
         lockPath: join(multiRootDir, "lock.yaml"),
       }),
@@ -510,16 +510,16 @@ describe("daemon IPC", () => {
   });
 
   it("keeps previously indexed skills when SKILL.md is temporarily unreadable", async () => {
-    const unreadableDir = await mkdtemp(join(tmpdir(), "cobweb-unreadable-index-"));
+    const unreadableDir = await mkdtemp(join(tmpdir(), "skillroute-unreadable-index-"));
     const unreadableSkill = join(unreadableDir, "kept");
     const skillFile = join(unreadableSkill, "SKILL.md");
     await mkdir(unreadableSkill, { recursive: true });
     await writeFile(skillFile, "---\nname: kept\ndescription: Kept skill\n---\n\n# Body\n\nRetained needle.\n");
 
-    const unreadableSocket = join(unreadableDir, "cobwebd.sock");
+    const unreadableSocket = join(unreadableDir, "skillrouted.sock");
     const state = createAppState({
       dataDir: unreadableDir,
-      dbPath: join(unreadableDir, "cobweb.db"),
+      dbPath: join(unreadableDir, "skillroute.db"),
       socketPath: unreadableSocket,
       lockPath: join(unreadableDir, "lock.yaml"),
     });
@@ -572,7 +572,7 @@ describe("daemon IPC", () => {
   });
 
   it("routes workItem.subject into ranking so the core object wins", async () => {
-    const subjectRoot = await mkdtemp(join(tmpdir(), "cobweb-daemon-subject-"));
+    const subjectRoot = await mkdtemp(join(tmpdir(), "skillroute-daemon-subject-"));
     const rbacSkill = join(subjectRoot, "rbac-policy-audit");
     const createSkill = join(subjectRoot, "create-skill");
     await mkdir(rbacSkill, { recursive: true });
@@ -586,10 +586,10 @@ describe("daemon IPC", () => {
       "---\nname: create-skill\ndescription: Create Cursor Agent Skills. Use when authoring a new skill or asking about SKILL.md structure.\n---\n\n# Create\n\nAuthor a new skill.\n",
     );
 
-    const subjectSocket = join(subjectRoot, "cobwebd.sock");
+    const subjectSocket = join(subjectRoot, "skillrouted.sock");
     const subjectState = createAppState({
       dataDir: subjectRoot,
-      dbPath: join(subjectRoot, "cobweb.db"),
+      dbPath: join(subjectRoot, "skillroute.db"),
       socketPath: subjectSocket,
       lockPath: join(subjectRoot, "lock.yaml"),
     });
@@ -665,15 +665,15 @@ describe("daemon IPC", () => {
   });
 
   it("sync --write upserts lockfile skills before recording provider installs", async () => {
-    const syncDir = await mkdtemp(join(tmpdir(), "cobweb-sync-empty-db-"));
+    const syncDir = await mkdtemp(join(tmpdir(), "skillroute-sync-empty-db-"));
     const source = join(syncDir, "source");
     await mkdir(source, { recursive: true });
     await writeFile(join(source, "SKILL.md"), "---\nname: synced\ndescription: Synced skill\n---\n\n# Body\n");
 
-    const lockfilePath = join(syncDir, "cobweb.lock.yaml");
+    const lockfilePath = join(syncDir, "skillroute.lock.yaml");
     await importCanonicalSkill(source, { canonicalDir: join(syncDir, "canonical"), lockfilePath });
 
-    const syncSocket = join(syncDir, "cobwebd.sock");
+    const syncSocket = join(syncDir, "skillrouted.sock");
     const syncServer = await startIpcServer(
       createAppState({
         dataDir: syncDir,
@@ -699,7 +699,7 @@ describe("daemon IPC", () => {
   });
 
   it("re-indexes ad-hoc roots after a lockfile rebuild prunes them", async () => {
-    const baseDir = await mkdtemp(join(tmpdir(), "cobweb-rebuild-reindex-"));
+    const baseDir = await mkdtemp(join(tmpdir(), "skillroute-rebuild-reindex-"));
     const projectRoot = join(baseDir, "project");
     const projectSkill = join(projectRoot, "review");
     await mkdir(projectSkill, { recursive: true });
@@ -712,13 +712,13 @@ describe("daemon IPC", () => {
     await mkdir(source, { recursive: true });
     await writeFile(join(source, "SKILL.md"), "---\nname: other\ndescription: Other skill\n---\n\n# Body\n");
 
-    const rebuildSocket = join(baseDir, "cobwebd.sock");
+    const rebuildSocket = join(baseDir, "skillrouted.sock");
     const rebuildServer = await startIpcServer(
       createAppState({
         dataDir: baseDir,
         dbPath: join(baseDir, "rebuild.db"),
         socketPath: rebuildSocket,
-        lockPath: join(baseDir, "cobweb.lock.yaml"),
+        lockPath: join(baseDir, "skillroute.lock.yaml"),
       }),
     );
 
@@ -737,11 +737,11 @@ describe("daemon IPC", () => {
   });
 
   it("restores watch roots after daemon restart without marking them fresh", async () => {
-    const restoreDir = await mkdtemp(join(tmpdir(), "cobweb-restore-watch-"));
+    const restoreDir = await mkdtemp(join(tmpdir(), "skillroute-restore-watch-"));
     const restoreSkill = join(restoreDir, "watch");
     await mkdir(restoreSkill, { recursive: true });
     await writeFile(join(restoreSkill, "SKILL.md"), "---\nname: watch\ndescription: Watch skill\n---\n\n# Body\n\nWatch body.\n");
-    const restoreDb = join(restoreDir, "cobweb.db");
+    const restoreDb = join(restoreDir, "skillroute.db");
     const restoreLock = join(restoreDir, "lock.yaml");
     const firstSocket = join(restoreDir, "first.sock");
     const firstServer = await startIpcServer(
@@ -778,11 +778,11 @@ describe("daemon IPC", () => {
   });
 
   it("reconciles changes made while the daemon was stopped on the first query after restart", async () => {
-    const restartDir = await mkdtemp(join(tmpdir(), "cobweb-restart-reconcile-"));
+    const restartDir = await mkdtemp(join(tmpdir(), "skillroute-restart-reconcile-"));
     const restartSkill = join(restartDir, "changing");
     await mkdir(restartSkill, { recursive: true });
     await writeFile(join(restartSkill, "SKILL.md"), "---\nname: changing\ndescription: Changing skill\n---\n\n# Body\n\nOld body.\n");
-    const restartDb = join(restartDir, "cobweb.db");
+    const restartDb = join(restartDir, "skillroute.db");
     const restartLock = join(restartDir, "lock.yaml");
     const firstSocket = join(restartDir, "first.sock");
     const firstServer = await startIpcServer(
@@ -835,7 +835,7 @@ describe("daemon IPC", () => {
   });
 
   it("fails to connect to a missing socket", async () => {
-    await expect(callDaemon("status", undefined, join(dir, "missing.sock"))).rejects.toThrow(/cobwebd/);
+    await expect(callDaemon("status", undefined, join(dir, "missing.sock"))).rejects.toThrow(/skillrouted/);
   });
 
   it("returns BAD_JSON for malformed input without crashing", async () => {
@@ -858,13 +858,13 @@ describe("daemon IPC", () => {
   });
 
   it("does not idle-stop while a runtime lease is active", async () => {
-    const leaseDir = await mkdtemp(join(tmpdir(), "cobweb-lease-"));
-    const leaseSocket = join(leaseDir, "cobwebd.sock");
+    const leaseDir = await mkdtemp(join(tmpdir(), "skillroute-lease-"));
+    const leaseSocket = join(leaseDir, "skillrouted.sock");
     const leaseServer = await startIpcServer(
       createAppState(
         {
           dataDir: leaseDir,
-          dbPath: join(leaseDir, "cobweb.db"),
+          dbPath: join(leaseDir, "skillroute.db"),
           socketPath: leaseSocket,
           lockPath: join(leaseDir, "lock.yaml"),
         },
@@ -878,7 +878,7 @@ describe("daemon IPC", () => {
       await expect(callDaemon("status", undefined, leaseSocket)).resolves.toMatchObject({ running: true });
       await lease.detach();
       await delay(1_100);
-      await expect(callDaemon("status", undefined, leaseSocket)).rejects.toThrow(/cobwebd|closed/i);
+      await expect(callDaemon("status", undefined, leaseSocket)).rejects.toThrow(/skillrouted|closed/i);
     } finally {
       lease.close();
       await leaseServer.close();
@@ -888,7 +888,7 @@ describe("daemon IPC", () => {
   it("refuses to start a second daemon on the same socket", async () => {
     const state = createAppState({
       dataDir: dir,
-      dbPath: join(dir, "cobweb.db"),
+      dbPath: join(dir, "skillroute.db"),
       socketPath,
       lockPath: join(dir, "lock.yaml"),
     });

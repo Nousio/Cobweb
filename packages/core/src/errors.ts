@@ -1,10 +1,10 @@
-export class CobwebError extends Error {
+export class SkillRouteError extends Error {
   readonly code: string;
   readonly retryable: boolean;
 
   constructor(code: string, message: string, options: { retryable?: boolean; cause?: unknown } = {}) {
     super(message, { cause: options.cause });
-    this.name = "CobwebError";
+    this.name = "SkillRouteError";
     this.code = code;
     this.retryable = options.retryable ?? false;
   }

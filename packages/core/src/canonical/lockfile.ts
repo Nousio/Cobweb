@@ -1,9 +1,9 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import YAML from "yaml";
-import type { CanonicalSkillRecord, CobwebLockfile } from "../types.js";
+import type { CanonicalSkillRecord, SkillRouteLockfile } from "../types.js";
 
-export function emptyLockfile(): CobwebLockfile {
+export function emptyLockfile(): SkillRouteLockfile {
   return {
     version: 1,
     generatedAt: new Date().toISOString(),
@@ -11,9 +11,9 @@ export function emptyLockfile(): CobwebLockfile {
   };
 }
 
-export async function readCobwebLockfile(path: string): Promise<CobwebLockfile> {
+export async function readSkillRouteLockfile(path: string): Promise<SkillRouteLockfile> {
   try {
-    const parsed = YAML.parse(await readFile(path, "utf8")) as Partial<CobwebLockfile> | null;
+    const parsed = YAML.parse(await readFile(path, "utf8")) as Partial<SkillRouteLockfile> | null;
     return normalizeLockfile(parsed);
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
@@ -23,7 +23,7 @@ export async function readCobwebLockfile(path: string): Promise<CobwebLockfile> 
   }
 }
 
-export async function writeCobwebLockfile(path: string, lockfile: CobwebLockfile): Promise<void> {
+export async function writeSkillRouteLockfile(path: string, lockfile: SkillRouteLockfile): Promise<void> {
   const normalized = normalizeLockfile(lockfile);
   const tempPath = `${path}.tmp-${process.pid}`;
   await mkdir(dirname(path), { recursive: true });
@@ -31,9 +31,9 @@ export async function writeCobwebLockfile(path: string, lockfile: CobwebLockfile
   await rename(tempPath, path);
 }
 
-export async function upsertLockfileRecord(path: string, record: CanonicalSkillRecord): Promise<CobwebLockfile> {
-  const lockfile = await readCobwebLockfile(path);
-  const next: CobwebLockfile = {
+export async function upsertLockfileRecord(path: string, record: CanonicalSkillRecord): Promise<SkillRouteLockfile> {
+  const lockfile = await readSkillRouteLockfile(path);
+  const next: SkillRouteLockfile = {
     ...lockfile,
     generatedAt: new Date().toISOString(),
     skills: [
@@ -41,11 +41,11 @@ export async function upsertLockfileRecord(path: string, record: CanonicalSkillR
       record,
     ].sort((left, right) => left.name.localeCompare(right.name)),
   };
-  await writeCobwebLockfile(path, next);
+  await writeSkillRouteLockfile(path, next);
   return next;
 }
 
-function normalizeLockfile(value: Partial<CobwebLockfile> | null | undefined): CobwebLockfile {
+function normalizeLockfile(value: Partial<SkillRouteLockfile> | null | undefined): SkillRouteLockfile {
   return {
     version: 1,
     generatedAt: typeof value?.generatedAt === "string" ? value.generatedAt : new Date().toISOString(),

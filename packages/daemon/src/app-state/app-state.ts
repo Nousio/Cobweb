@@ -1,5 +1,5 @@
-import { defaultRuntimePaths, type IndexFreshness, type RuntimePaths, WriterQueue } from "@cobweb/core";
-import { CobwebDatabase } from "@cobweb/core/db";
+import { defaultRuntimePaths, type IndexFreshness, type RuntimePaths, WriterQueue } from "@skillroute/core";
+import { SkillRouteDatabase } from "@skillroute/core/db";
 import type { FSWatcher } from "chokidar";
 
 export type WatcherState = "starting" | "ready" | "unavailable";
@@ -64,7 +64,7 @@ export interface RuntimeLease {
 
 export interface AppState {
   paths: RuntimePaths;
-  db: CobwebDatabase;
+  db: SkillRouteDatabase;
   writer: WriterQueue;
   freshness: "fresh" | "rebuilding" | "degraded";
   lastError: string | null;
@@ -95,18 +95,18 @@ export function createAppState(
   const now = Date.now();
   return {
     paths,
-    db: new CobwebDatabase(paths.dbPath),
+    db: new SkillRouteDatabase(paths.dbPath),
     writer: new WriterQueue(),
     freshness: "fresh",
     lastError: null,
     lastRequestAt: now,
     lastActivityAt: now,
-    idleTimeoutMs: options.idleTimeoutMs ?? Number(process.env.COBWEB_IDLE_TIMEOUT_MS ?? 10 * 60 * 1000),
-    idleGraceMs: options.idleGraceMs ?? readPositiveIntegerEnv("COBWEB_IDLE_GRACE_MS", 30_000),
-    leaseTtlMs: options.leaseTtlMs ?? readPositiveIntegerEnv("COBWEB_LEASE_TTL_MS", 30_000),
+    idleTimeoutMs: options.idleTimeoutMs ?? Number(process.env.SKILLROUTE_IDLE_TIMEOUT_MS ?? 10 * 60 * 1000),
+    idleGraceMs: options.idleGraceMs ?? readPositiveIntegerEnv("SKILLROUTE_IDLE_GRACE_MS", 30_000),
+    leaseTtlMs: options.leaseTtlMs ?? readPositiveIntegerEnv("SKILLROUTE_LEASE_TTL_MS", 30_000),
     activeRequests: 0,
     lastShutdownReason: null,
-    maxStalenessMs: readPositiveIntegerEnv("COBWEB_MAX_STALENESS_MS", 2_000),
+    maxStalenessMs: readPositiveIntegerEnv("SKILLROUTE_MAX_STALENESS_MS", 2_000),
     leases: new Map(),
     watchers: new Map(),
     watchRoots: new Set(),

@@ -1,6 +1,6 @@
 # Contributing
 
-Cobweb is an npm workspace monorepo. The governance core stays free of transport and presentation concerns, and each layer depends only on the ones beneath it.
+SkillRoute is an npm workspace monorepo. The governance core stays free of transport and presentation concerns, and each layer depends only on the ones beneath it.
 
 Contributions are accepted under the same `AGPL-3.0-only` license as the project.
 
@@ -8,9 +8,9 @@ Contributions are accepted under the same `AGPL-3.0-only` license as the project
 
 - `packages/core` — pure governance logic: parsing, Method extraction, scanning, linting, dedup, FTS search, canonical storage, projection, providers, runtime paths, schema, and the Writer Queue.
 - `packages/daemon` — local JSON-RPC daemon over a Unix domain socket; owns runtime state, runtime leases, index lifecycle, watch root recovery, and all SQLite writes.
-- `packages/cli` — the `cobweb` / `cw` commands.
+- `packages/cli` — the `skillroute` / `sr` commands.
 - `packages/mcp` — the MCP stdio server, which exposes governance and explainable skill routing tools by connecting to the daemon and holding a runtime lease for the MCP session.
-- `packages/cobweb` — the openCobweb aggregate package published as `opencobweb`; it bundles the others behind the `cobweb`, `cw`, `cobwebd`, and `cobweb-mcp` binaries.
+- `packages/skillroute` — the SkillRoute aggregate package published as `skillroute`; it bundles the others behind the `skillroute`, `sr`, `skillrouted`, and `skillroute-mcp` binaries.
 - `test` — unit and integration tests, organized by package and feature area; parser compatibility fixtures live under `test/fixtures/skills`.
 - `examples/skills` — smoke-test skills covering normal, duplicate, linked-resource, script-reference, and policy-difference cases.
 
@@ -46,7 +46,7 @@ Index lifecycle tests should cover both daemon behavior and core storage primiti
 
 Runtime lifecycle changes should preserve the single-owner daemon model. MCP may start or reconnect to the daemon at session startup, but tool calls should forward through the daemon client; lease, active request, writer, and index in-flight state must all block idle shutdown.
 
-Release packaging, publish-set verification, and the npm publish are maintainer tasks. They run from local release scripts kept outside this repository, so they are not part of the contributor workflow and are not needed to build, test, or run Cobweb locally.
+Release packaging, publish-set verification, and the npm publish are maintainer tasks. They run from local release scripts kept outside this repository, so they are not part of the contributor workflow and are not needed to build, test, or run SkillRoute locally.
 
 ## Continuous Integration
 

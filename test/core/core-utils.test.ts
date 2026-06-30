@@ -1,30 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { CobwebError, toErrorMessage } from "../../packages/core/src/errors.js";
+import { SkillRouteError, toErrorMessage } from "../../packages/core/src/errors.js";
 import { sha256 } from "../../packages/core/src/hash.js";
 import { builtinProviders } from "../../packages/core/src/providers/provider.js";
 
 describe("hash", () => {
   it("computes a stable sha256 hex digest", () => {
-    expect(sha256("cobweb")).toBe(sha256("cobweb"));
-    expect(sha256("cobweb")).toHaveLength(64);
+    expect(sha256("skillroute")).toBe(sha256("skillroute"));
+    expect(sha256("skillroute")).toHaveLength(64);
     expect(sha256("a")).not.toBe(sha256("b"));
   });
 
   it("hashes buffers", () => {
-    expect(sha256(Buffer.from("cobweb"))).toBe(sha256("cobweb"));
+    expect(sha256(Buffer.from("skillroute"))).toBe(sha256("skillroute"));
   });
 });
 
 describe("errors", () => {
-  it("preserves code and retryable on CobwebError", () => {
-    const error = new CobwebError("BAD", "broken", { retryable: true });
+  it("preserves code and retryable on SkillRouteError", () => {
+    const error = new SkillRouteError("BAD", "broken", { retryable: true });
     expect(error.code).toBe("BAD");
     expect(error.retryable).toBe(true);
-    expect(error.name).toBe("CobwebError");
+    expect(error.name).toBe("SkillRouteError");
   });
 
   it("defaults retryable to false", () => {
-    expect(new CobwebError("X", "y").retryable).toBe(false);
+    expect(new SkillRouteError("X", "y").retryable).toBe(false);
   });
 
   it("converts unknown errors to messages", () => {

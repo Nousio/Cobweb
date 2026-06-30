@@ -9,9 +9,9 @@ import {
   parseSkillDirectory,
   scanSkills,
   skillChain,
-} from "@cobweb/core";
-import type { DaemonMethods } from "@cobweb/daemon";
-import { callDaemon } from "@cobweb/daemon/client";
+} from "@skillroute/core";
+import type { DaemonMethods } from "@skillroute/daemon";
+import { callDaemon } from "@skillroute/daemon/client";
 import { Command } from "commander";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -22,8 +22,8 @@ import { printError, printJson } from "./output/json.js";
 const program = new Command();
 
 program
-  .name("cobweb")
-  .alias("cw")
+  .name("skillroute")
+  .alias("sr")
   .description("Local governance kernel for agent skills")
   .version("0.4.3");
 
@@ -196,7 +196,7 @@ program
     });
   });
 
-const daemon = program.command("daemon").description("Manage the local cobwebd daemon");
+const daemon = program.command("daemon").description("Manage the local skillrouted daemon");
 
 daemon.command("start").action(async () => {
   try {
@@ -209,7 +209,7 @@ daemon.command("start").action(async () => {
 
   const pid = spawnDaemonProcess();
   if (pid === null) {
-    throw new Error("Cannot find built cobwebd entrypoint. Run `npm run build` first or start `npm run dev:daemon`.");
+    throw new Error("Cannot find built skillrouted entrypoint. Run `npm run build` first or start `npm run dev:daemon`.");
   }
 
   printJson({ started: true, pid });
@@ -257,7 +257,7 @@ async function startDaemonForLazyWrite(cause: unknown): Promise<void> {
   const pid = spawnDaemonProcess();
   if (pid === null) {
     throw new Error(
-      `Daemon is not reachable and no built cobwebd entrypoint was found. Run \`npm run build\` or set COBWEBD_BIN. Cause: ${cause instanceof Error ? cause.message : String(cause)
+      `Daemon is not reachable and no built skillrouted entrypoint was found. Run \`npm run build\` or set SKILLROUTED_BIN. Cause: ${cause instanceof Error ? cause.message : String(cause)
       }`,
     );
   }
@@ -289,8 +289,8 @@ function parseOnOff(value: string | undefined): boolean | undefined {
 }
 
 function resolveDaemonEntrypoint(): string | null {
-  if (process.env.COBWEBD_BIN) {
-    return process.env.COBWEBD_BIN;
+  if (process.env.SKILLROUTED_BIN) {
+    return process.env.SKILLROUTED_BIN;
   }
 
   const built = fileURLToPath(new URL("../../daemon/dist/index.js", import.meta.url));

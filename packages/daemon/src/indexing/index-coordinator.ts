@@ -5,7 +5,7 @@ import {
   toErrorMessage,
   type IndexFreshness,
   type ParsedSkill
-} from "@cobweb/core";
+} from "@skillroute/core";
 import { watch } from "chokidar";
 import { access, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";

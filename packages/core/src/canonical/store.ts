@@ -16,7 +16,7 @@ export interface CanonicalImportOptions {
 export async function importCanonicalSkill(skillRoot: string, options: CanonicalImportOptions): Promise<CanonicalSkillRecord> {
   const parsed = await parseSkillDirectory(skillRoot);
   const canonicalPath = join(options.canonicalDir, safeName(parsed.name || basename(skillRoot)));
-  const tempPath = await mkdtemp(join(tmpdir(), "cobweb-canonical-"));
+  const tempPath = await mkdtemp(join(tmpdir(), "skillroute-canonical-"));
 
   await mkdir(options.canonicalDir, { recursive: true });
   await cp(skillRoot, tempPath, {
